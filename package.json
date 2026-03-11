@@ -1,0 +1,17 @@
+{
+  "name": "fieldsurveyor",
+  "version": "1.0.0",
+  "description": "City telemetry logger — As-Suwayda mapping project",
+  "scripts": {
+    "sync": "npx cap sync",
+    "open": "npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "6.x",
+    "@capacitor/app":     "6.x",
+    "@capacitor/core":    "6.x"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "6.x"
+  }
+}

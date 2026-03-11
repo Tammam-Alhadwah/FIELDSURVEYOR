@@ -1,0 +1,11 @@
+{
+  "appId":   "com.fieldsurveyor.app",
+  "appName": "FieldSurveyor",
+  "webDir":  "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "backgroundColor": "#080c0a"
+  }
+}

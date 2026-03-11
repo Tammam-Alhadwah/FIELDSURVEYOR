@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>FieldSurveyor — City Logger</title>
+    <link rel="manifest" href="manifest.json">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Barlow+Condensed:wght@300;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #080c0a; --surface: #0f1612; --surface2: #161f1a;
+            --border: #1e2e24; --accent: #39ff84; --accent-dim: #1a7a3d;
+            --amber: #ffb830; --red: #ff4444; --blue: #4af; --purple: #c084fc;
+            --text: #c8d9cc; --text-dim: #5a7063;
+            --mono: 'Space Mono', monospace; --display: 'Barlow Condensed', sans-serif;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: var(--mono); background: var(--bg); color: var(--text); min-height: 100vh; padding: 12px; overflow-x: hidden; }
+        body::before { content: ''; position: fixed; inset: 0; background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px); pointer-events: none; z-index: 999; }
+
+        .header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+        .header h1 { font-family: var(--display); font-size: 28px; font-weight: 900; letter-spacing: 0.05em; color: var(--accent); text-shadow: 0 0 20px rgba(57,255,132,0.4); }
+        .header .sub { font-size: 10px; color: var(--text-dim); letter-spacing: 0.15em; text-transform: uppercase; }
+
+        .btn-apk {
+            display: block;
+            font-family: var(--display);
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            padding: 13px;
+            border-radius: 6px;
+            text-align: center;
+            text-decoration: none;
+            margin-bottom: 12px;
+            background: linear-gradient(135deg,#2a1a5c,#1a0d40);
+            color: var(--purple);
+            border: 1px solid #5a2a9a;
+            transition: all 0.15s;
+        }
+        .btn-apk:active { transform: scale(0.97); }
+
+        .status-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+        .badge { font-family: var(--display); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; padding: 4px 9px; border-radius: 3px; text-transform: uppercase; }
+        .badge.idle { background: #1a1a1a; color: var(--text-dim); border: 1px solid var(--border); }
+        .badge.ok   { background: rgba(57,255,132,0.12); color: var(--accent); border: 1px solid var(--accent-dim); }
+        .badge.warn { background: rgba(255,184,48,0.12); color: var(--amber); border: 1px solid #7a5800; }
+        .badge.err  { background: rgba(255,68,68,0.12); color: var(--red); border: 1px solid #7a1a1a; }
+        .badge.info { background: rgba(68,170,255,0.1); color: var(--blue); border: 1px solid #1a4a7a; }
+
+        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+        .btn { font-family: var(--display); font-size: 16px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; padding: 13px; border: none; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
+        .btn:active { transform: scale(0.97); }
+        .btn-start   { background: linear-gradient(135deg,#1a5c30,#0d3d1f); color: var(--accent); border: 1px solid var(--accent-dim); grid-column: 1/-1; font-size: 20px; }
+        .btn-stop    { background: linear-gradient(135deg,#5c1a1a,#3d0d0d); color: var(--red); border: 1px solid #7a2020; display: none; grid-column: 1/-1; font-size: 20px; }
+        .btn-dl      { background: linear-gradient(135deg,#1a3a5c,#0d2040); color: var(--blue); border: 1px solid #1a4a7a; display: none; }
+        .btn-restore { background: linear-gradient(135deg,#3a2a0a,#251a05); color: var(--amber); border: 1px solid #7a5800; display: none; font-size: 13px; }
+
+        .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 13px; margin-bottom: 10px; }
+        .panel-title { font-family: var(--display); font-size: 11px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 11px; display: flex; align-items: center; gap: 8px; }
+        .panel-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+        .sensor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+        .sensor-cell { background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; padding: 9px 7px; text-align: center; }
+        .sensor-cell .label { font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 4px; }
+        .sensor-cell .value { font-size: 16px; font-weight: 700; color: var(--accent); }
+        .sensor-cell .unit  { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
+        .sensor-cell.wide { grid-column: span 3; }
+        .sensor-cell.mid  { grid-column: span 2; }
+        .sensor-cell.v-amber  .value { color: var(--amber); }
+        .sensor-cell.v-blue   .value { color: var(--blue); }
+        .sensor-cell.v-purple .value { color: var(--purple); }
+
+        .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-bottom: 10px; }
+        .stat-box { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 9px 7px; text-align: center; }
+        .stat-box .s-val { font-family: var(--display); font-size: 22px; font-weight: 700; color: var(--amber); }
+        .stat-box .s-lbl { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); margin-top: 3px; }
+
+        #elapsedTimer { font-family: var(--display); font-size: 36px; font-weight: 300; letter-spacing: 0.1em; color: var(--accent); text-align: center; padding: 8px 0; text-shadow: 0 0 30px rgba(57,255,132,0.3); }
+        .coords { font-size: 13px; color: var(--text); text-align: center; }
+        .gps-bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 6px; }
+        .gps-bar-fill { height: 100%; background: var(--accent); transition: width 0.5s; }
+
+        .notice { background: rgba(255,184,48,0.08); border: 1px solid #7a5800; border-radius: 6px; padding: 10px 14px; font-size: 11px; color: var(--amber); margin-bottom: 10px; line-height: 1.6; }
+
+        #logFeed { font-size: 11px; color: var(--text-dim); height: 80px; overflow-y: auto; padding: 8px; background: var(--bg); border-radius: 5px; border: 1px solid var(--border); }
+        #logFeed .log-line { margin-bottom: 3px; }
+        #logFeed .log-line.warn { color: var(--amber); }
+        #logFeed .log-line.ok   { color: var(--accent); }
+        #logFeed .log-line.err  { color: var(--red); }
+
+        .bump-flash { position: fixed; inset: 0; background: rgba(255,68,68,0.15); pointer-events: none; opacity: 0; z-index: 998; transition: opacity 0.1s; }
+        .bump-flash.active { opacity: 1; }
+
+        .highlight       { color: var(--accent); }
+        .highlight-amber { color: var(--amber); }
+
+        @media (max-width: 360px) {
+            .stats-row   { grid-template-columns: repeat(2,1fr); }
+            .sensor-grid { grid-template-columns: repeat(2,1fr); }
+        }
+    </style>
+</head>
+<body>
+
+<div class="bump-flash" id="bumpFlash"></div>
+
+<div class="header">
+    <h1>FIELDSURVEYOR</h1>
+    <span class="sub">City Telemetry Logger · v1</span>
+</div>
+
+<!-- APK DOWNLOAD — only shown when not running as installed APK -->
+<a class="btn-apk" id="apkBanner"
+   href="https://github.com/Tammam-Alhadwah/FIELDSURVEYOR/releases/latest/download/app-debug.apk">
+    ↓ DOWNLOAD ANDROID APK
+</a>
+
+<div class="status-bar">
+    <span class="badge idle" id="badgeGPS">GPS: —</span>
+    <span class="badge idle" id="badgeMotion">IMU: —</span>
+    <span class="badge idle" id="badgeMag">MAG: —</span>
+    <span class="badge idle" id="badgeLight">LUX: —</span>
+    <span class="badge idle" id="badgeBattery">BAT: —</span>
+    <span class="badge idle" id="badgeNetwork">NET: —</span>
+    <span class="badge idle" id="badgeWakeLock">WAKE: —</span>
+</div>
+
+<div class="notice">
+    ⚠ <strong>GO OUTSIDE FIRST</strong> — GPS needs open sky (~15 sec to lock).
+    Badge turns green when ready. Records only save after lock is acquired.
+    Disable battery optimisation for this app in Android Settings.
+</div>
+
+<div class="controls">
+    <button class="btn btn-start"   id="startBtn">▶ START RECORDING</button>
+    <button class="btn btn-stop"    id="stopBtn">■ STOP RECORDING</button>
+    <button class="btn btn-dl"      id="downloadBtn">↓ EXPORT CSV</button>
+    <button class="btn btn-restore" id="restoreBtn">↺ RESTORE BACKUP</button>
+</div>
+
+<!-- TIMER -->
+<div class="panel">
+    <div class="panel-title">Session</div>
+    <div id="elapsedTimer">00:00:00</div>
+    <div class="coords" id="coordsDisplay">No GPS lock yet…</div>
+    <div class="gps-bar"><div class="gps-bar-fill" id="gpsBar" style="width:0%"></div></div>
+</div>
+
+<!-- STATS -->
+<div class="stats-row">
+    <div class="stat-box"><div class="s-val" id="statPoints">0</div><div class="s-lbl">Records</div></div>
+    <div class="stat-box"><div class="s-val" id="statDist">0.0</div><div class="s-lbl">km</div></div>
+    <div class="stat-box"><div class="s-val" id="statBumps">0</div><div class="s-lbl">Bumps</div></div>
+    <div class="stat-box"><div class="s-val" id="statMaxSpd">0</div><div class="s-lbl">Max km/h</div></div>
+</div>
+
+<!-- GPS -->
+<div class="panel">
+    <div class="panel-title">📍 GPS / Position</div>
+    <div class="sensor-grid">
+        <div class="sensor-cell mid">
+            <div class="label">Speed</div>
+            <div class="value" id="v-speed">0.0</div>
+            <div class="unit">km/h</div>
+        </div>
+        <div class="sensor-cell">
+            <div class="label">Heading</div>
+            <div class="value" id="v-heading">0</div>
+            <div class="unit">°</div>
+        </div>
+        <div class="sensor-cell mid">
+            <div class="label">Altitude</div>
+            <div class="value" id="v-altitude">—</div>
+            <div class="unit">m ASL</div>
+        </div>
+        <div class="sensor-cell">
+            <div class="label">Accuracy</div>
+            <div class="value" id="v-accuracy">—</div>
+            <div class="unit">m</div>
+        </div>
+    </div>
+</div>
+
+<!-- ACCELEROMETER -->
+<div class="panel">
+    <div class="panel-title">📈 Accelerometer + Linear Accel (m/s²)</div>
+    <div class="sensor-grid">
+        <div class="sensor-cell">
+            <div class="label">Raw X</div>
+            <div class="value" id="v-ax">0.00</div>
+        </div>
+        <div class="sensor-cell">
+            <div class="label">Raw Y</div>
+            <div class="value" id="v-ay">0.00</div>
+        </div>
+        <div class="sensor-cell">
+            <div class="label">Raw Z</div>
+            <div class="value" id="v-az">0.00</div>
+        </div>
+        <div class="sensor-cell v-blue">
+            <div class="label">Linear X</div>
+            <div class="value" id="v-lx">—</div>
+        </div>
+        <div class="sensor-cell v-blue">
+            <div class="label">Linear Y</div>
+            <div class="value" id="v-ly">—</div>
+        </div>
+        <div class="sensor-cell v-blue">
+            <div class="label">Linear Z</div>
+            <div class="value" id="v-lz">—</div>
+        </div>
+        <div class="sensor-cell wide">
+            <div class="label">Peak Magnitude this second</div>
+            <div class="value" id="v-mag">0.00</div>
+            <div class="unit">m/s² — bump fires at &gt;18</div>
+        </div>
+    </div>
+</div>
+
+<!-- GYRO + ORIENTATION -->
+<div class="panel">
+    <div class="panel-title">🔄 Gyroscope (°/s) + Orientation (°)</div>
+    <div class="sensor-grid">
+        <div class="sensor-cell">
+            <div class="label">Gyro α</div>
+            <div class="value" id="v-gx">0.00</div>
+        </div>
+        <div class="sensor-cell">
+            <div class="label">Gyro β</div>
+            <div class="value" id="v-gy">0.00</div>
+        </div>
+        <div class="sensor-cell">
+            <div class="label">Gyro γ</div>
+            <div class="value" id="v-gz">0.00</div>
+        </div>
+        <div class="sensor-cell">
+            <div class="label">Compass α</div>
+            <div class="value" id="v-oa">—</div>
+            <div class="unit">°</div>
+        </div>
+        <div class="sensor-cell">
+            <div class="label">Pitch β</div>
+            <div class="value" id="v-ob">—</div>
+            <div class="unit">°</div>
+        </div>
+        <div class="sensor-cell">
+            <div class="label">Roll γ</div>
+            <div class="value" id="v-og">—</div>
+            <div class="unit">°</div>
+        </div>
+    </div>
+</div>
+
+<!-- MAGNETOMETER -->
+<div class="panel">
+    <div class="panel-title">🧲 Magnetometer (µT)</div>
+    <div class="sensor-grid">
+        <div class="sensor-cell v-purple">
+            <div class="label">Mag X</div>
+            <div class="value" id="v-mx">—</div>
+            <div class="unit">µT</div>
+        </div>
+        <div class="sensor-cell v-purple">
+            <div class="label">Mag Y</div>
+            <div class="value" id="v-my">—</div>
+            <div class="unit">µT</div>
+        </div>
+        <div class="sensor-cell v-purple">
+            <div class="label">Mag Z</div>
+            <div class="value" id="v-mz">—</div>
+            <div class="unit">µT</div>
+        </div>
+        <div class="sensor-cell wide v-purple">
+            <div class="label">Total Field Strength</div>
+            <div class="value" id="v-mtotal">—</div>
+            <div class="unit">µT — Earth ~25–65 µT · Spikes = power lines / metal structures</div>
+        </div>
+    </div>
+</div>
+
+<!-- ABSOLUTE ORIENTATION -->
+<div class="panel">
+    <div class="panel-title">🎯 Absolute Orientation — Sensor Fusion Quaternion</div>
+    <div class="sensor-grid">
+        <div class="sensor-cell v-amber">
+            <div class="label">Quat W</div>
+            <div class="value" id="v-qw">—</div>
+        </div>
+        <div class="sensor-cell v-amber">
+            <div class="label">Quat X</div>
+            <div class="value" id="v-qx">—</div>
+        </div>
+        <div class="sensor-cell v-amber">
+            <div class="label">Quat Y</div>
+            <div class="value" id="v-qy">—</div>
+        </div>
+        <div class="sensor-cell v-amber mid">
+            <div class="label">Quat Z</div>
+            <div class="value" id="v-qz">—</div>
+        </div>
+        <div class="sensor-cell">
+            <div class="label">Gravity Z</div>
+            <div class="value" id="v-gvz">—</div>
+        </div>
+    </div>
+</div>
+
+<!-- ENVIRONMENT -->
+<div class="panel">
+    <div class="panel-title">🌐 Environment / System</div>
+    <div class="sensor-grid">
+        <div class="sensor-cell">
+            <div class="label">Battery</div>
+            <div class="value" id="v-bat">—</div>
+            <div class="unit" id="v-bat-status">—</div>
+        </div>
+        <div class="sensor-cell">
+            <div class="label">Network</div>
+            <div class="value" id="v-net">—</div>
+            <div class="unit" id="v-net-dl">—</div>
+        </div>
+        <div class="sensor-cell">
+            <div class="label">Net RTT</div>
+            <div class="value" id="v-rtt">—</div>
+            <div class="unit">ms</div>
+        </div>
+        <div class="sensor-cell wide v-amber">
+            <div class="label">Ambient Light</div>
+            <div class="value" id="v-lux">—</div>
+            <div class="unit">lux</div>
+        </div>
+    </div>
+</div>
+
+<!-- LOG -->
+<div class="panel">
+    <div class="panel-title">System Log</div>
+    <div id="logFeed"></div>
+</div>
+
+<script>
+'use strict';
+
+// Hide APK download button when running as installed app
+if (window.matchMedia('(display-mode: standalone)').matches) {
+    const b = document.getElementById('apkBanner');
+    if (b) b.style.display = 'none';
+}
+
+// ═══════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════
+const SESSION_KEY    = 'fieldsurveyor_v1';
+const BUMP_THRESHOLD = 18; // m/s²
+
+let isRecording = false, recordedData = [], geoWatchId, recordingInterval;
+let recordingStartTime = 0, wakeLock = null;
+
+// GPS
+let gps = { lat:0, lng:0, alt:null, speed:0, heading:0, acc:null, altAcc:null };
+let prevLat = 0, prevLng = 0, totalDistKm = 0, maxSpeedKmh = 0;
+
+// Motion — DeviceMotionEvent (cross-platform)
+let accelX = 0, accelY = 0, accelZ = 0;
+let gyroX  = 0, gyroY  = 0, gyroZ  = 0;
+let orientAlpha = 0, orientBeta = 0, orientGamma = 0;
+let magBuffer = [], bumpCount = 0;
+
+// Generic Sensor API (Capacitor APK only)
+let linAccel  = { x:null, y:null, z:null };
+let magSensor = { x:null, y:null, z:null };
+let absSensor = { w:null, x:null, y:null, z:null };
+let gravZ     = null;
+let luxValue  = null;
+
+// Environment
+let batLevel = null, batCharging = null;
+let netType = null, netEffType = null, netDownlink = null, netRTT = null;
+
+// ═══════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════
+function log(msg, type = '') {
+    const feed = document.getElementById('logFeed');
+    const t = new Date().toTimeString().slice(0, 8);
+    const d = document.createElement('div');
+    d.className = `log-line ${type}`;
+    d.textContent = `[${t}] ${msg}`;
+    feed.prepend(d);
+    while (feed.children.length > 40) feed.removeChild(feed.lastChild);
+}
+
+function setBadge(id, text, state) {
+    const b = document.getElementById(id);
+    if (!b) return;
+    b.className = `badge ${state}`;
+    b.textContent = text;
+}
+
+function haversine(lat1, lng1, lat2, lng2) {
+    const R = 6371;
+    const dL = (lat2 - lat1) * Math.PI / 180;
+    const dN = (lng2 - lng1) * Math.PI / 180;
+    const a  = Math.sin(dL/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dN/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function fmt(v, d = 2) {
+    return (v !== null && v !== undefined && v !== '') ? parseFloat(v).toFixed(d) : '';
+}
+
+// ═══════════════════════════════════════════════════
+//  BATTERY
+// ═══════════════════════════════════════════════════
+async function initBattery() {
+    if (!('getBattery' in navigator)) { log('Battery API: not supported', 'warn'); return; }
+    try {
+        const bat = await navigator.getBattery();
+        const upd = () => {
+            batLevel    = bat.level;
+            batCharging = bat.charging;
+            const p = Math.round(bat.level * 100);
+            setBadge('badgeBattery', `BAT: ${p}%${bat.charging ? '⚡' : ''}`, p > 20 ? 'ok' : 'err');
+            document.getElementById('v-bat').textContent = p + '%';
+            const left = bat.charging
+                ? 'Charging'
+                : (bat.dischargingTime === Infinity ? 'Unknown' : `~${Math.round(bat.dischargingTime / 60)}m`);
+            document.getElementById('v-bat-status').textContent = left;
+        };
+        bat.addEventListener('levelchange',    upd);
+        bat.addEventListener('chargingchange', upd);
+        upd();
+        log('Battery API: OK', 'ok');
+    } catch (e) { log('Battery API error: ' + e.message, 'warn'); }
+}
+
+// ═══════════════════════════════════════════════════
+//  NETWORK
+// ═══════════════════════════════════════════════════
+function initNetwork() {
+    const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    if (!c) { log('Network Info API: not supported', 'warn'); return; }
+    const upd = () => {
+        netType     = c.type          || '?';
+        netEffType  = c.effectiveType || '?';
+        netDownlink = c.downlink      || null;
+        netRTT      = c.rtt           || null;
+        setBadge('badgeNetwork', `NET: ${netEffType}`, netEffType?.includes('4g') ? 'ok' : 'warn');
+        document.getElementById('v-net').textContent    = netEffType;
+        document.getElementById('v-net-dl').textContent = netDownlink ? netDownlink + ' Mbps' : '';
+        document.getElementById('v-rtt').textContent    = netRTT ?? '—';
+    };
+    c.addEventListener('change', upd);
+    upd();
+    log('Network Info API: OK', 'ok');
+}
+
+// ═══════════════════════════════════════════════════
+//  WAKE LOCK
+// ═══════════════════════════════════════════════════
+async function requestWakeLock() {
+    if (!('wakeLock' in navigator)) {
+        setBadge('badgeWakeLock', 'WAKE: N/A', 'idle');
+        log('Wake Lock: not supported', 'warn');
+        return;
+    }
+    try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        setBadge('badgeWakeLock', 'WAKE: ON', 'ok');
+        log('Wake Lock: screen will stay on', 'ok');
+        wakeLock.addEventListener('release', () => {
+            setBadge('badgeWakeLock', 'WAKE: LOST', 'warn');
+            log('Wake Lock released', 'warn');
+        });
+    } catch (e) {
+        setBadge('badgeWakeLock', 'WAKE: FAIL', 'err');
+        log('Wake Lock failed: ' + e.message, 'err');
+    }
+}
+
+document.addEventListener('visibilitychange', async () => {
+    if (isRecording && document.visibilityState === 'visible' && wakeLock?.released) {
+        await requestWakeLock();
+    }
+});
+
+// ═══════════════════════════════════════════════════
+//  GENERIC SENSOR API (Capacitor APK only)
+// ═══════════════════════════════════════════════════
+function initGenericSensors() {
+
+    if ('LinearAccelerationSensor' in window) {
+        try {
+            const s = new LinearAccelerationSensor({ frequency: 20 });
+            s.addEventListener('reading', () => { linAccel = { x: s.x, y: s.y, z: s.z }; });
+            s.addEventListener('error',   e => log('LinearAccel error: ' + e.error, 'warn'));
+            s.start();
+            log('LinearAccelerationSensor: active', 'ok');
+        } catch (e) { log('LinearAccel: ' + e.message, 'warn'); }
+    } else { log('LinearAccelerationSensor: not available', 'warn'); }
+
+    if ('Magnetometer' in window) {
+        try {
+            const s = new Magnetometer({ frequency: 5 });
+            s.addEventListener('reading', () => {
+                magSensor = { x: s.x, y: s.y, z: s.z };
+                const total = Math.sqrt(s.x**2 + s.y**2 + s.z**2);
+                document.getElementById('v-mx').textContent     = s.x?.toFixed(1) ?? '—';
+                document.getElementById('v-my').textContent     = s.y?.toFixed(1) ?? '—';
+                document.getElementById('v-mz').textContent     = s.z?.toFixed(1) ?? '—';
+                document.getElementById('v-mtotal').textContent = total.toFixed(1);
+                setBadge('badgeMag', `MAG: ${total.toFixed(0)}µT`, 'ok');
+            });
+            s.addEventListener('error', e => {
+                setBadge('badgeMag', 'MAG: ERR', 'err');
+                log('Magnetometer error: ' + e.error, 'warn');
+            });
+            s.start();
+            setBadge('badgeMag', 'MAG: ON', 'ok');
+            log('Magnetometer: active', 'ok');
+        } catch (e) {
+            setBadge('badgeMag', 'MAG: N/A', 'idle');
+            log('Magnetometer: ' + e.message, 'warn');
+        }
+    } else {
+        setBadge('badgeMag', 'MAG: N/A', 'idle');
+        log('Magnetometer: not available', 'warn');
+    }
+
+    if ('AbsoluteOrientationSensor' in window) {
+        try {
+            const s = new AbsoluteOrientationSensor({ frequency: 10 });
+            s.addEventListener('reading', () => {
+                if (s.quaternion) {
+                    absSensor = { x: s.quaternion[0], y: s.quaternion[1], z: s.quaternion[2], w: s.quaternion[3] };
+                    document.getElementById('v-qw').textContent = absSensor.w?.toFixed(3) ?? '—';
+                    document.getElementById('v-qx').textContent = absSensor.x?.toFixed(3) ?? '—';
+                    document.getElementById('v-qy').textContent = absSensor.y?.toFixed(3) ?? '—';
+                    document.getElementById('v-qz').textContent = absSensor.z?.toFixed(3) ?? '—';
+                }
+            });
+            s.start();
+            log('AbsoluteOrientationSensor: active', 'ok');
+        } catch (e) { log('AbsoluteOrientation: ' + e.message, 'warn'); }
+    }
+
+    if ('GravitySensor' in window) {
+        try {
+            const s = new GravitySensor({ frequency: 5 });
+            s.addEventListener('reading', () => {
+                gravZ = s.z;
+                document.getElementById('v-gvz').textContent = s.z?.toFixed(2) ?? '—';
+            });
+            s.start();
+            log('GravitySensor: active', 'ok');
+        } catch (e) { log('GravitySensor: ' + e.message, 'warn'); }
+    }
+
+    if ('AmbientLightSensor' in window) {
+        try {
+            const s = new AmbientLightSensor({ frequency: 2 });
+            s.addEventListener('reading', () => {
+                luxValue = s.illuminance;
+                document.getElementById('v-lux').textContent = s.illuminance?.toFixed(0) ?? '—';
+                setBadge('badgeLight', `LUX: ${s.illuminance?.toFixed(0)}`, 'ok');
+            });
+            s.addEventListener('error', e => {
+                setBadge('badgeLight', 'LUX: N/A', 'idle');
+                log('AmbientLight: ' + e.error, 'warn');
+            });
+            s.start();
+            setBadge('badgeLight', 'LUX: ON', 'ok');
+            log('AmbientLightSensor: active', 'ok');
+        } catch (e) {
+            setBadge('badgeLight', 'LUX: N/A', 'idle');
+            log('AmbientLight: ' + e.message, 'warn');
+        }
+    } else {
+        setBadge('badgeLight', 'LUX: N/A', 'idle');
+        log('AmbientLightSensor: not available', 'warn');
+    }
+}
+
+// ═══════════════════════════════════════════════════
+//  MOTION HANDLERS
+// ═══════════════════════════════════════════════════
+function handleMotion(e) {
+    const g = e.accelerationIncludingGravity;
+    accelX = g?.x || 0;
+    accelY = g?.y || 0;
+    accelZ = g?.z || 0;
+    gyroX  = e.rotationRate?.alpha || 0;
+    gyroY  = e.rotationRate?.beta  || 0;
+    gyroZ  = e.rotationRate?.gamma || 0;
+    magBuffer.push(Math.sqrt(accelX**2 + accelY**2 + accelZ**2));
+}
+
+function handleOrientation(e) {
+    orientAlpha = e.alpha || 0;
+    orientBeta  = e.beta  || 0;
+    orientGamma = e.gamma || 0;
+    document.getElementById('v-oa').textContent = orientAlpha.toFixed(1);
+    document.getElementById('v-ob').textContent = orientBeta.toFixed(1);
+    document.getElementById('v-og').textContent = orientGamma.toFixed(1);
+}
+
+// ═══════════════════════════════════════════════════
+//  GPS HANDLER
+// ═══════════════════════════════════════════════════
+function handleGPS(pos) {
+    const c = pos.coords;
+    gps = {
+        lat:     c.latitude,
+        lng:     c.longitude,
+        alt:     c.altitude,
+        speed:   c.speed    || 0,
+        heading: c.heading  || 0,
+        acc:     c.accuracy,
+        altAcc:  c.altitudeAccuracy
+    };
+
+    const kmh = gps.speed * 3.6;
+    if (kmh > maxSpeedKmh) {
+        maxSpeedKmh = kmh;
+        document.getElementById('statMaxSpd').textContent = Math.round(maxSpeedKmh);
+    }
+
+    if (prevLat && prevLng) {
+        const d = haversine(prevLat, prevLng, gps.lat, gps.lng);
+        if (d < 0.5) {
+            totalDistKm += d;
+            document.getElementById('statDist').textContent = totalDistKm.toFixed(2);
+        }
+    }
+    prevLat = gps.lat;
+    prevLng = gps.lng;
+
+    const quality = Math.max(0, Math.min(100, 100 - (gps.acc / 50 * 100)));
+    document.getElementById('gpsBar').style.width = quality + '%';
+    setBadge('badgeGPS', `GPS: ${gps.acc?.toFixed(0) ?? '?'}m`, quality > 60 ? 'ok' : 'warn');
+}
+
+// ═══════════════════════════════════════════════════
+//  START
+// ═══════════════════════════════════════════════════
+async function startRecording() {
+    if (typeof DeviceMotionEvent?.requestPermission === 'function') {
+        try {
+            const p = await DeviceMotionEvent.requestPermission();
+            if (p !== 'granted') { alert('Motion permission denied'); return; }
+        } catch (e) { console.error(e); }
+    }
+
+    isRecording        = true;
+    recordedData       = [];
+    recordingStartTime = Date.now();
+    totalDistKm        = 0;
+    bumpCount          = 0;
+    maxSpeedKmh        = 0;
+    prevLat = prevLng  = 0;
+
+    document.getElementById('startBtn').style.display    = 'none';
+    document.getElementById('stopBtn').style.display     = 'block';
+    document.getElementById('downloadBtn').style.display = 'none';
+    document.getElementById('restoreBtn').style.display  = 'none';
+
+    await requestWakeLock();
+    initGenericSensors();
+
+    if ('geolocation' in navigator) {
+        geoWatchId = navigator.geolocation.watchPosition(
+            handleGPS,
+            e => log('GPS error: ' + e.message, 'err'),
+            { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+        );
+        log('GPS: searching for signal…', 'info');
+    } else {
+        log('Geolocation not available', 'err');
+    }
+
+    window.addEventListener('devicemotion',      handleMotion);
+    window.addEventListener('deviceorientation', handleOrientation);
+    setBadge('badgeMotion', 'IMU: ON', 'ok');
+    log('Recording started', 'ok');
+
+    recordingInterval = setInterval(() => {
+        const ts      = new Date().toISOString();
+        const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+        const h = Math.floor(elapsed / 3600);
+        const m = Math.floor((elapsed % 3600) / 60);
+        const s = elapsed % 60;
+        document.getElementById('elapsedTimer').textContent =
+            `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+
+        const peakMag = magBuffer.length ? Math.max(...magBuffer) : 0;
+        const avgMag  = magBuffer.length ? magBuffer.reduce((a, b) => a + b, 0) / magBuffer.length : 0;
+        const isBump  = peakMag > BUMP_THRESHOLD;
+        magBuffer = [];
+
+        if (isBump) {
+            bumpCount++;
+            document.getElementById('statBumps').textContent = bumpCount;
+            const flash = document.getElementById('bumpFlash');
+            flash.classList.add('active');
+            setTimeout(() => flash.classList.remove('active'), 200);
+            log(`⚠ BUMP! peak=${peakMag.toFixed(1)} m/s²`, 'warn');
+        }
+
+        const kmh      = gps.speed * 3.6;
+        const magTotal = magSensor.x !== null
+            ? Math.sqrt(magSensor.x**2 + magSensor.y**2 + magSensor.z**2)
+            : null;
+
+        const dp = {
+            timestamp:         ts,
+            elapsed_s:         elapsed,
+            lat:               fmt(gps.lat,    7),
+            lng:               fmt(gps.lng,    7),
+            altitude_m:        fmt(gps.alt,    1),
+            alt_accuracy_m:    fmt(gps.altAcc, 1),
+            speed_kmh:         fmt(kmh,        2),
+            heading_deg:       fmt(gps.heading,2),
+            gps_accuracy_m:    fmt(gps.acc,    1),
+            accel_x:           fmt(accelX, 3),
+            accel_y:           fmt(accelY, 3),
+            accel_z:           fmt(accelZ, 3),
+            accel_peak_mag:    fmt(peakMag, 3),
+            accel_avg_mag:     fmt(avgMag,  3),
+            bump_detected:     isBump ? 1 : 0,
+            linear_accel_x:    fmt(linAccel.x, 3),
+            linear_accel_y:    fmt(linAccel.y, 3),
+            linear_accel_z:    fmt(linAccel.z, 3),
+            gyro_alpha:        fmt(gyroX, 3),
+            gyro_beta:         fmt(gyroY, 3),
+            gyro_gamma:        fmt(gyroZ, 3),
+            orient_alpha:      fmt(orientAlpha, 2),
+            orient_beta:       fmt(orientBeta,  2),
+            orient_gamma:      fmt(orientGamma, 2),
+            mag_x:             fmt(magSensor.x, 2),
+            mag_y:             fmt(magSensor.y, 2),
+            mag_z:             fmt(magSensor.z, 2),
+            mag_total_uT:      fmt(magTotal,    2),
+            quat_w:            fmt(absSensor.w, 4),
+            quat_x:            fmt(absSensor.x, 4),
+            quat_y:            fmt(absSensor.y, 4),
+            quat_z:            fmt(absSensor.z, 4),
+            gravity_z:         fmt(gravZ, 3),
+            ambient_lux:       fmt(luxValue, 1),
+            battery_pct:       batLevel    !== null ? Math.round(batLevel * 100) : '',
+            charging:          batCharging !== null ? (batCharging ? 1 : 0)      : '',
+            net_type:          netType     ?? '',
+            net_eff_type:      netEffType  ?? '',
+            net_downlink_mbps: netDownlink ?? '',
+            net_rtt_ms:        netRTT      ?? ''
+        };
+
+        if (gps.lat !== 0) recordedData.push(dp);
+
+        document.getElementById('statPoints').textContent = recordedData.length;
+        document.getElementById('coordsDisplay').innerHTML =
+            `<span class="highlight">${fmt(gps.lat,5)}°N, ${fmt(gps.lng,5)}°E</span>` +
+            (gps.alt ? `  <span class="highlight-amber">alt ${fmt(gps.alt,0)}m</span>` : '');
+
+        document.getElementById('v-speed').textContent    = kmh.toFixed(1);
+        document.getElementById('v-heading').textContent  = fmt(gps.heading, 0);
+        document.getElementById('v-altitude').textContent = gps.alt ? fmt(gps.alt, 0) : '—';
+        document.getElementById('v-accuracy').textContent = gps.acc ? fmt(gps.acc, 0) : '—';
+
+        document.getElementById('v-ax').textContent  = fmt(accelX, 2);
+        document.getElementById('v-ay').textContent  = fmt(accelY, 2);
+        document.getElementById('v-az').textContent  = fmt(accelZ, 2);
+        document.getElementById('v-lx').textContent  = linAccel.x !== null ? fmt(linAccel.x, 2) : '—';
+        document.getElementById('v-ly').textContent  = linAccel.y !== null ? fmt(linAccel.y, 2) : '—';
+        document.getElementById('v-lz').textContent  = linAccel.z !== null ? fmt(linAccel.z, 2) : '—';
+        document.getElementById('v-mag').textContent = peakMag.toFixed(2);
+
+        document.getElementById('v-gx').textContent = fmt(gyroX, 2);
+        document.getElementById('v-gy').textContent = fmt(gyroY, 2);
+        document.getElementById('v-gz').textContent = fmt(gyroZ, 2);
+
+        if (recordedData.length > 0 && recordedData.length % 60 === 0) {
+            try {
+                localStorage.setItem(SESSION_KEY, JSON.stringify({ ts, data: recordedData }));
+                log(`Auto-saved ${recordedData.length} records`, 'ok');
+            } catch (e) { log('Auto-save failed', 'err'); }
+        }
+
+    }, 1000);
+}
+
+// ═══════════════════════════════════════════════════
+//  STOP
+// ═══════════════════════════════════════════════════
+document.getElementById('stopBtn').addEventListener('click', () => {
+    isRecording = false;
+    clearInterval(recordingInterval);
+    if (geoWatchId != null) navigator.geolocation.clearWatch(geoWatchId);
+    window.removeEventListener('devicemotion',      handleMotion);
+    window.removeEventListener('deviceorientation', handleOrientation);
+    if (wakeLock && !wakeLock.released) wakeLock.release();
+
+    if (recordedData.length > 0) {
+        try { localStorage.setItem(SESSION_KEY, JSON.stringify({ ts: new Date().toISOString(), data: recordedData })); }
+        catch (e) {}
+    }
+
+    const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+    const h = Math.floor(elapsed / 3600);
+    const m = Math.floor((elapsed % 3600) / 60);
+    const s = elapsed % 60;
+
+    document.getElementById('startBtn').style.display    = 'block';
+    document.getElementById('stopBtn').style.display     = 'none';
+    document.getElementById('downloadBtn').style.display = 'block';
+
+    ['badgeMotion','badgeWakeLock','badgeMag','badgeLight'].forEach(id => setBadge(id, id + ': OFF', 'idle'));
+
+    log(`Done — ${recordedData.length} records · ${totalDistKm.toFixed(2)} km · ${bumpCount} bumps · ${h}h${m}m${s}s`, 'ok');
+    document.getElementById('coordsDisplay').innerHTML =
+        `<span class="highlight-amber">✓ ${recordedData.length} pts · ${totalDistKm.toFixed(2)} km · ${bumpCount} bumps</span>`;
+});
+
+// ═══════════════════════════════════════════════════
+//  EXPORT CSV
+// ═══════════════════════════════════════════════════
+document.getElementById('downloadBtn').addEventListener('click', () => {
+    if (!recordedData.length) { log('No data to export', 'warn'); return; }
+    const csv = Object.keys(recordedData[0]).join(',') + '\n' +
+                recordedData.map(r => Object.values(r).join(',')).join('\n');
+    const a = Object.assign(document.createElement('a'), {
+        href:     URL.createObjectURL(new Blob([csv], { type: 'text/csv' })),
+        download: `survey_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.csv`
+    });
+    a.click();
+    URL.revokeObjectURL(a.href);
+    log('CSV exported: ' + recordedData.length + ' rows', 'ok');
+});
+
+// ═══════════════════════════════════════════════════
+//  BACKUP / RESTORE
+// ═══════════════════════════════════════════════════
+function checkBackup() {
+    try {
+        const raw = localStorage.getItem(SESSION_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        if (saved?.data?.length > 0) {
+            const rb = document.getElementById('restoreBtn');
+            rb.style.display = 'block';
+            rb.textContent   = `↺ RESTORE BACKUP (${saved.data.length} pts)`;
+            log(`Backup found: ${saved.data.length} records from ${saved.ts?.slice(0,16) ?? '?'}`, 'warn');
+        }
+    } catch (e) {}
+}
+
+document.getElementById('restoreBtn').addEventListener('click', () => {
+    try {
+        recordedData = JSON.parse(localStorage.getItem(SESSION_KEY)).data;
+        document.getElementById('statPoints').textContent    = recordedData.length;
+        document.getElementById('downloadBtn').style.display = 'block';
+        log(`Restored ${recordedData.length} records`, 'ok');
+    } catch (e) { log('Restore failed', 'err'); }
+});
+
+// ═══════════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════════
+document.getElementById('startBtn').addEventListener('click', startRecording);
+
+(async () => {
+    initNetwork();
+    await initBattery();
+    checkBackup();
+    log('FieldSurveyor v1 ready — go outside and press START', 'ok');
+})();
+
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js')
+        .then(() => log('Service Worker registered', 'ok'))
+        .catch(e => log('SW error: ' + e.message, 'warn'));
+}
+</script>
+</body>
+</html>
