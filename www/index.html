@@ -415,6 +415,7 @@ let map;
 let mapLoaded = false;
 let geojsonRoute = { type: 'Feature', geometry: { type: 'LineString', coordinates:[] } };
 let geojsonBumps = { type: 'FeatureCollection', features:[] };
+let geojsonCar   = { type: 'Feature', geometry: { type: 'Point', coordinates:[36.57, 32.71] } };
 
 function initMap() {
     map = new maplibregl.Map({
@@ -431,6 +432,7 @@ function initMap() {
         mapLoaded = true;
         log('3D Map Engine Loaded', 'ok');
 
+        // 1. Draw Route Trail
         map.addSource('routeSource', { type: 'geojson', data: geojsonRoute });
         map.addLayer({
             id: 'routeLayer',
@@ -445,26 +447,91 @@ function initMap() {
             }
         });
 
-        map.addSource('bumpSource', { type: 'geojson', data: geojsonBumps });
+        // 2. POTHOLE HEATMAP (Glowing Aura)
         map.addLayer({
-            id: 'bumpLayer',
+            id: 'bumpHeatmapLayer',
+            type: 'heatmap',
+            source: 'bumpSource',
+            paint: {
+                // Heavier bumps (e.g. 30 m/s²) carry more "weight" than minor ones (18 m/s²)
+                'heatmap-weight': ['interpolate',['linear'], ['get', 'mag'], 18, 1, 30, 3],
+                // Increase intensity as you zoom in
+                'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 15, 1, 20, 3],
+                // Cyberpunk / Thermal color gradient
+                'heatmap-color':[
+                    'interpolate', ['linear'], ['heatmap-density'],
+                    0, 'rgba(255, 68, 68, 0)',
+                    0.3, 'rgba(255, 68, 68, 0.6)',
+                    0.6, 'rgba(255, 150, 0, 0.8)',
+                    0.9, 'rgba(255, 220, 0, 1)',
+                    1, 'rgba(255, 255, 255, 1)'
+                ],
+                // Size of the heat glow scales as you zoom
+                'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 15, 20, 20, 60],
+                'heatmap-opacity': 0.8
+            }
+        });
+
+        // 3. POTHOLE EXACT CENTER (White Core with Red Border)
+        map.addLayer({
+            id: 'bumpCoreLayer',
             type: 'circle',
             source: 'bumpSource',
             paint: { 
-                'circle-radius': 10, 
-                'circle-color': '#ff4444', 
+                'circle-radius': 4, 
+                'circle-color': '#ffffff', 
                 'circle-stroke-width': 2, 
-                'circle-stroke-color': '#000',
-                'circle-opacity': 0.9
+                'circle-stroke-color': '#ff4444',
+                'circle-pitch-alignment': 'map' // Lies flat on road
+            }
+        });
+
+        // 4. Draw Car Current Location (Neon Green)
+        map.addSource('carSource', { type: 'geojson', data: geojsonCar });
+        
+        // Car Glow Aura
+        map.addLayer({
+            id: 'carGlowLayer',
+            type: 'circle',
+            source: 'carSource',
+            paint: { 
+                'circle-radius': 20, 
+                'circle-color': '#39ff84', 
+                'circle-blur': 1,
+                'circle-opacity': 0.4,
+                'circle-pitch-alignment': 'map'
+            }
+        });
+
+        // Car Solid Core
+        map.addLayer({
+            id: 'carLayer',
+            type: 'circle',
+            source: 'carSource',
+            paint: { 
+                'circle-radius': 8, 
+                'circle-color': '#39ff84', 
+                'circle-stroke-width': 3, 
+                'circle-stroke-color': '#ffffff',
+                'circle-pitch-alignment': 'map' // Lies flat on road
             }
         });
     });
 }
-
 function mapFollowCar(kmh) {
     if (!mapLoaded || gps.lat === 0) return;
     
-    // Only rotate map if we are moving faster than 4km/h
+    // UPDATE GLOWING CAR POSITION
+    geojsonCar.geometry.coordinates =[gps.lng, gps.lat];
+    map.getSource('carSource').setData(geojsonCar);
+
+    // --- NEW: DYNAMIC ZOOM MATH ---
+    // If stopped (0 kmh) -> Zoom in close (18.5)
+    // If fast (60+ kmh)  -> Zoom out to see the road ahead (16.0)
+    let targetZoom = 18.5 - (kmh / 60) * 2.5;
+    targetZoom = Math.max(15, Math.min(18.5, targetZoom)); // Clamp values
+
+    // Only rotate map if moving faster than 4km/h to prevent dizzying spins at red lights
     let currentBearing = map.getBearing();
     if (kmh > 4 && gps.heading !== null) {
         currentBearing = gps.heading;
@@ -474,12 +541,11 @@ function mapFollowCar(kmh) {
         center: [gps.lng, gps.lat],
         bearing: currentBearing,
         pitch: 60,
-        zoom: 17.5,
+        zoom: targetZoom, // <-- Now uses dynamic speed-scaled zoom!
         duration: 1000,
         easing: t => t
     });
 }
-
 // ═══════════════════════════════════════════════════
 //  HELPERS
 // ═══════════════════════════════════════════════════
@@ -510,6 +576,28 @@ function haversine(lat1, lng1, lat2, lng2) {
 
 function fmt(v, d = 2) {
     return (v !== null && v !== undefined && v !== '') ? parseFloat(v).toFixed(d) : '';
+}
+
+function speak(text) {
+    if ('speechSynthesis' in window) {
+        // Force the browser to load voices if it hasn't yet
+        let voices = window.speechSynthesis.getVoices();
+        
+        window.speechSynthesis.cancel(); // Clear any stuck speech
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.0;
+        utterance.pitch = 0.9;
+        
+        // Optional: Try to find an English/Robotic voice if available
+        const englishVoice = voices.find(v => v.lang.includes('en') && v.name.includes('Google'));
+        if (englishVoice) utterance.voice = englishVoice;
+
+        window.speechSynthesis.speak(utterance);
+    }
+}
+
+if ('speechSynthesis' in window) {
+    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
 }
 
 // ═══════════════════════════════════════════════════
@@ -748,6 +836,8 @@ function handleGPS(pos) {
     // Jump map to first fix
     if (prevLat === 0 && mapLoaded) {
         map.jumpTo({ center:[gps.lng, gps.lat], zoom: 16 });
+        speak("GPS lock acquired. Route mapping initiated.");
+
     }
 
     const kmh = gps.speed * 3.6;
@@ -775,6 +865,11 @@ function handleGPS(pos) {
 //  START
 // ═══════════════════════════════════════════════════
 async function startRecording() {
+    if ('speechSynthesis' in window) {
+        const unlockMsg = new SpeechSynthesisUtterance('');
+        unlockMsg.volume = 0;
+        window.speechSynthesis.speak(unlockMsg);
+    }
     if (typeof DeviceMotionEvent?.requestPermission === 'function') {
         try {
             const p = await DeviceMotionEvent.requestPermission();
@@ -821,6 +916,7 @@ async function startRecording() {
     window.addEventListener('deviceorientation', handleOrientation);
     setBadge('badgeMotion', 'IMU: ON', 'ok');
     log('Recording started', 'ok');
+    speak("Telemetry online. Searching for GPS satellites.");
 
     recordingInterval = setInterval(() => {
         const ts      = new Date().toISOString();
@@ -853,8 +949,15 @@ async function startRecording() {
             setTimeout(() => flash.classList.remove('active'), 200);
             
             if (mapLoaded) {
-                geojsonBumps.features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [gps.lng, gps.lat] } });
+                geojsonBumps.features.push({ 
+                    type: 'Feature', 
+                    properties: { mag: peakMag },
+                    geometry: { type: 'Point', coordinates:[gps.lng, gps.lat] } 
+                });
                 map.getSource('bumpSource').setData(geojsonBumps);
+            }
+            if (peakMag > 25) {
+                speak(`Warning. Severe impact detected. ${Math.round(peakMag)} meters per second squared.`);
             }
             log(`⚠ BUMP! peak=${peakMag.toFixed(1)} m/s²`, 'warn');
         }
@@ -972,7 +1075,8 @@ document.getElementById('stopBtn').addEventListener('click', () => {
     document.getElementById('startBtn').style.display    = 'block';
     document.getElementById('stopBtn').style.display     = 'none';
     document.getElementById('downloadBtn').style.display = 'block';['badgeMotion','badgeWakeLock','badgeMag','badgeLight'].forEach(id => setBadge(id, id + ': OFF', 'idle'));
-
+    
+    speak("Telemetry offline. Survey data secured.");
     log(`Done — ${recordedData.length} records · ${totalDistKm.toFixed(2)} km · ${bumpCount} bumps · ${h}h${m}m${s}s`, 'ok');
     document.getElementById('coordsDisplay').innerHTML =
         `<span class="highlight-amber">✓ ${recordedData.length} pts · ${totalDistKm.toFixed(2)} km · ${bumpCount} bumps</span>`;
