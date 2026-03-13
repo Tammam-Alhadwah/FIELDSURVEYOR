@@ -10,6 +10,8 @@
     "@capacitor/android": "7.x",
     "@capacitor/app":     "7.x",
     "@capacitor/core":    "7.x",
+    "@capacitor/filesystem": "7.x",
+    "@capacitor/share": "7.x",
     "@danyalwe/capacitor-sensors": "^1.0.1"
   },
   "devDependencies": {

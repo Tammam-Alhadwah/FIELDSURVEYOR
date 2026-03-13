@@ -856,18 +856,51 @@ document.getElementById('stopBtn').addEventListener('click', () => {
 // ═══════════════════════════════════════════════════
 //  EXPORT CSV
 // ═══════════════════════════════════════════════════
-document.getElementById('downloadBtn').addEventListener('click', () => {
+document.getElementById('downloadBtn').addEventListener('click', async () => {
     if (!recordedData.length) { log('No data to export', 'warn'); return; }
+    
     const csv = Object.keys(recordedData[0]).join(',') + '\n' +
                 recordedData.map(r => Object.values(r).join(',')).join('\n');
-    const a = Object.assign(document.createElement('a'), {
-        href:     URL.createObjectURL(new Blob([csv], { type: 'text/csv' })),
-        download: `survey_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.csv`
-    });
-    a.click();
-    URL.revokeObjectURL(a.href);
-    log('CSV exported: ' + recordedData.length + ' rows', 'ok');
+    const fileName = `survey_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.csv`;
+
+    // 📱 NATIVE ANDROID EXPORT
+    if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
+        try {
+            const { Filesystem, Share } = window.Capacitor.Plugins;
+            
+            // 1. Write the file to the app's internal cache directory
+            const result = await Filesystem.writeFile({
+                path: fileName,
+                data: csv,
+                directory: 'CACHE', // CACHE doesn't require extra Android permissions!
+                encoding: 'utf8'
+            });
+
+            // 2. Open the native Android Share menu
+            await Share.share({
+                title: 'Export Survey Data',
+                text: 'Here is the exported CSV from FieldSurveyor.',
+                url: result.uri,
+                dialogTitle: 'Save or Share CSV'
+            });
+            
+            log('CSV shared successfully', 'ok');
+        } catch (e) {
+            log('Export failed: ' + e.message, 'err');
+        }
+    } 
+    // 💻 STANDARD WEB EXPORT (For GitHub Pages website)
+    else {
+        const a = Object.assign(document.createElement('a'), {
+            href:     URL.createObjectURL(new Blob([csv], { type: 'text/csv' })),
+            download: fileName
+        });
+        a.click();
+        URL.revokeObjectURL(a.href);
+        log('CSV exported: ' + recordedData.length + ' rows', 'ok');
+    }
 });
+
 
 // ═══════════════════════════════════════════════════
 //  BACKUP / RESTORE
