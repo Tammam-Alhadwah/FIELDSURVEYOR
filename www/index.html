@@ -432,7 +432,7 @@ function initMap() {
         mapLoaded = true;
         log('3D Map Engine Loaded', 'ok');
 
-        // 1. Draw Route Trail
+        // 1. ROUTE TRAIL
         map.addSource('routeSource', { type: 'geojson', data: geojsonRoute });
         map.addLayer({
             id: 'routeLayer',
@@ -447,17 +447,17 @@ function initMap() {
             }
         });
 
-        // 2. POTHOLE HEATMAP (Glowing Aura)
+        // 2. POTHOLE HEATMAP & CORE
+        // (This is the line that was missing!)
+        map.addSource('bumpSource', { type: 'geojson', data: geojsonBumps });
+        
         map.addLayer({
             id: 'bumpHeatmapLayer',
             type: 'heatmap',
             source: 'bumpSource',
             paint: {
-                // Heavier bumps (e.g. 30 m/s²) carry more "weight" than minor ones (18 m/s²)
                 'heatmap-weight': ['interpolate',['linear'], ['get', 'mag'], 18, 1, 30, 3],
-                // Increase intensity as you zoom in
                 'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 15, 1, 20, 3],
-                // Cyberpunk / Thermal color gradient
                 'heatmap-color':[
                     'interpolate', ['linear'], ['heatmap-density'],
                     0, 'rgba(255, 68, 68, 0)',
@@ -466,13 +466,11 @@ function initMap() {
                     0.9, 'rgba(255, 220, 0, 1)',
                     1, 'rgba(255, 255, 255, 1)'
                 ],
-                // Size of the heat glow scales as you zoom
                 'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 15, 20, 20, 60],
                 'heatmap-opacity': 0.8
             }
         });
 
-        // 3. POTHOLE EXACT CENTER (White Core with Red Border)
         map.addLayer({
             id: 'bumpCoreLayer',
             type: 'circle',
@@ -482,14 +480,13 @@ function initMap() {
                 'circle-color': '#ffffff', 
                 'circle-stroke-width': 2, 
                 'circle-stroke-color': '#ff4444',
-                'circle-pitch-alignment': 'map' // Lies flat on road
+                'circle-pitch-alignment': 'map' 
             }
         });
 
-        // 4. Draw Car Current Location (Neon Green)
+        // 3. GLOWING CAR MARKER
         map.addSource('carSource', { type: 'geojson', data: geojsonCar });
         
-        // Car Glow Aura
         map.addLayer({
             id: 'carGlowLayer',
             type: 'circle',
@@ -503,7 +500,6 @@ function initMap() {
             }
         });
 
-        // Car Solid Core
         map.addLayer({
             id: 'carLayer',
             type: 'circle',
@@ -513,11 +509,12 @@ function initMap() {
                 'circle-color': '#39ff84', 
                 'circle-stroke-width': 3, 
                 'circle-stroke-color': '#ffffff',
-                'circle-pitch-alignment': 'map' // Lies flat on road
+                'circle-pitch-alignment': 'map' 
             }
         });
     });
 }
+
 function mapFollowCar(kmh) {
     if (!mapLoaded || gps.lat === 0) return;
     
@@ -578,21 +575,27 @@ function fmt(v, d = 2) {
     return (v !== null && v !== undefined && v !== '') ? parseFloat(v).toFixed(d) : '';
 }
 
+// --- CRASH-PROOF VOICE TELEMETRY ---
 function speak(text) {
-    if ('speechSynthesis' in window) {
-        // Force the browser to load voices if it hasn't yet
-        let voices = window.speechSynthesis.getVoices();
-        
-        window.speechSynthesis.cancel(); // Clear any stuck speech
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 1.0;
-        utterance.pitch = 0.9;
-        
-        // Optional: Try to find an English/Robotic voice if available
-        const englishVoice = voices.find(v => v.lang.includes('en') && v.name.includes('Google'));
-        if (englishVoice) utterance.voice = englishVoice;
+    try {
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel(); // Clear any stuck speech
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 1.0;
+            utterance.pitch = 0.9;
+            
+            // Safely try to find an English voice
+            try {
+                let voices = window.speechSynthesis.getVoices();
+                const englishVoice = voices.find(v => v.lang.includes('en') && v.name.includes('Google'));
+                if (englishVoice) utterance.voice = englishVoice;
+            } catch(e) {} // Ignore voice search errors
 
-        window.speechSynthesis.speak(utterance);
+            window.speechSynthesis.speak(utterance);
+        }
+    } catch (e) {
+        // If TTS fails completely, just fail silently without breaking the app
+        console.warn('Speech failed:', e);
     }
 }
 
@@ -865,11 +868,17 @@ function handleGPS(pos) {
 //  START
 // ═══════════════════════════════════════════════════
 async function startRecording() {
-    if ('speechSynthesis' in window) {
-        const unlockMsg = new SpeechSynthesisUtterance('');
-        unlockMsg.volume = 0;
-        window.speechSynthesis.speak(unlockMsg);
+
+    try {
+        if ('speechSynthesis' in window) {
+            const unlockMsg = new SpeechSynthesisUtterance('ready'); // Real word, no empty strings
+            unlockMsg.volume = 0; // Muted
+            window.speechSynthesis.speak(unlockMsg);
+        }
+    } catch (e) {
+        console.warn('Voice engine unavailable, continuing anyway.', e);
     }
+
     if (typeof DeviceMotionEvent?.requestPermission === 'function') {
         try {
             const p = await DeviceMotionEvent.requestPermission();
