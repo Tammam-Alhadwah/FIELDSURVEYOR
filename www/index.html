@@ -2,10 +2,14 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>FieldSurveyor — City Logger</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>FieldSurveyor V2 — City Logger</title>
     <link rel="manifest" href="manifest.json">
+    
+    <!-- MapLibre GL CSS & Fonts -->
+    <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Barlow+Condensed:wght@300;500;700;900&display=swap" rel="stylesheet">
+    
     <style>
         :root {
             --bg: #080c0a; --surface: #0f1612; --surface2: #161f1a;
@@ -15,33 +19,32 @@
             --mono: 'Space Mono', monospace; --display: 'Barlow Condensed', sans-serif;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: var(--mono); background: var(--bg); color: var(--text); min-height: 100vh; padding: 12px; overflow-x: hidden; }
-        body::before { content: ''; position: fixed; inset: 0; background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px); pointer-events: none; z-index: 999; }
+        body { font-family: var(--mono); background: var(--bg); color: var(--text); overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+        
+        /* OVERLAYS */
+        .bump-flash { position: fixed; inset: 0; background: rgba(255,68,68,0.25); pointer-events: none; opacity: 0; z-index: 9999; transition: opacity 0.1s; }
+        .bump-flash.active { opacity: 1; }
 
-        .header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-        .header h1 { font-family: var(--display); font-size: 28px; font-weight: 900; letter-spacing: 0.05em; color: var(--accent); text-shadow: 0 0 20px rgba(57,255,132,0.4); }
-        .header .sub { font-size: 10px; color: var(--text-dim); letter-spacing: 0.15em; text-transform: uppercase; }
+        /* V2 MAP SECTION */
+        #map-wrapper { flex: 0 0 45vh; position: relative; border-bottom: 2px solid var(--accent-dim); }
+        #map { width: 100%; height: 100%; background: #000; }
+        
+        .map-overlay-header { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(8,12,10,0.7); backdrop-filter: blur(5px); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); }
+        .map-overlay-header h1 { font-family: var(--display); font-size: 22px; font-weight: 900; letter-spacing: 0.05em; color: var(--accent); text-shadow: 0 0 10px rgba(57,255,132,0.4); margin-bottom: 2px;}
+        .map-overlay-header .sub { font-size: 9px; color: var(--text-dim); letter-spacing: 0.15em; text-transform: uppercase; }
 
-        .btn-apk {
-            display: block;
-            font-family: var(--display);
-            font-size: 16px;
-            font-weight: 700;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            padding: 13px;
-            border-radius: 6px;
-            text-align: center;
-            text-decoration: none;
-            margin-bottom: 12px;
-            background: linear-gradient(135deg,#2a1a5c,#1a0d40);
-            color: var(--purple);
-            border: 1px solid #5a2a9a;
-            transition: all 0.15s;
-        }
+        .speed-hud { position: absolute; bottom: 15px; right: 15px; z-index: 10; text-align: right; text-shadow: 0 0 10px #000; }
+        .speed-hud .val { font-family: var(--display); font-size: 48px; font-weight: 900; color: #fff; line-height: 1; }
+        .speed-hud .lbl { font-size: 12px; color: var(--accent); font-weight: 700; letter-spacing: 0.1em; }
+
+        /* SCROLLABLE DASHBOARD SECTION */
+        .scroll-panel { flex: 1; overflow-y: auto; padding: 12px; padding-bottom: 40px; }
+        .scroll-panel::before { content: ''; position: fixed; inset: 0; background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px); pointer-events: none; z-index: 999; }
+
+        .btn-apk { display: block; font-family: var(--display); font-size: 16px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; padding: 13px; border-radius: 6px; text-align: center; text-decoration: none; margin-bottom: 12px; background: linear-gradient(135deg,#2a1a5c,#1a0d40); color: var(--purple); border: 1px solid #5a2a9a; transition: all 0.15s; }
         .btn-apk:active { transform: scale(0.97); }
 
-        .status-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+        .status-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; position: relative; z-index: 1000; }
         .badge { font-family: var(--display); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; padding: 4px 9px; border-radius: 3px; text-transform: uppercase; }
         .badge.idle { background: #1a1a1a; color: var(--text-dim); border: 1px solid var(--border); }
         .badge.ok   { background: rgba(57,255,132,0.12); color: var(--accent); border: 1px solid var(--accent-dim); }
@@ -49,15 +52,17 @@
         .badge.err  { background: rgba(255,68,68,0.12); color: var(--red); border: 1px solid #7a1a1a; }
         .badge.info { background: rgba(68,170,255,0.1); color: var(--blue); border: 1px solid #1a4a7a; }
 
-        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
-        .btn { font-family: var(--display); font-size: 16px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; padding: 13px; border: none; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
+        .notice { background: rgba(255,184,48,0.08); border: 1px solid #7a5800; border-radius: 6px; padding: 10px 14px; font-size: 11px; color: var(--amber); margin-bottom: 10px; line-height: 1.6; position: relative; z-index: 1000; }
+
+        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; position: relative; z-index: 1000; }
+        .btn { font-family: var(--display); font-size: 16px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; padding: 15px; border: none; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
         .btn:active { transform: scale(0.97); }
         .btn-start   { background: linear-gradient(135deg,#1a5c30,#0d3d1f); color: var(--accent); border: 1px solid var(--accent-dim); grid-column: 1/-1; font-size: 20px; }
         .btn-stop    { background: linear-gradient(135deg,#5c1a1a,#3d0d0d); color: var(--red); border: 1px solid #7a2020; display: none; grid-column: 1/-1; font-size: 20px; }
         .btn-dl      { background: linear-gradient(135deg,#1a3a5c,#0d2040); color: var(--blue); border: 1px solid #1a4a7a; display: none; }
         .btn-restore { background: linear-gradient(135deg,#3a2a0a,#251a05); color: var(--amber); border: 1px solid #7a5800; display: none; font-size: 13px; }
 
-        .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 13px; margin-bottom: 10px; }
+        .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 13px; margin-bottom: 10px; position: relative; z-index: 1000; }
         .panel-title { font-family: var(--display); font-size: 11px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 11px; display: flex; align-items: center; gap: 8px; }
         .panel-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
@@ -72,7 +77,7 @@
         .sensor-cell.v-blue   .value { color: var(--blue); }
         .sensor-cell.v-purple .value { color: var(--purple); }
 
-        .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-bottom: 10px; }
+        .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-bottom: 10px; position: relative; z-index: 1000; }
         .stat-box { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 9px 7px; text-align: center; }
         .stat-box .s-val { font-family: var(--display); font-size: 22px; font-weight: 700; color: var(--amber); }
         .stat-box .s-lbl { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); margin-top: 3px; }
@@ -82,20 +87,26 @@
         .gps-bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 6px; }
         .gps-bar-fill { height: 100%; background: var(--accent); transition: width 0.5s; }
 
-        .notice { background: rgba(255,184,48,0.08); border: 1px solid #7a5800; border-radius: 6px; padding: 10px 14px; font-size: 11px; color: var(--amber); margin-bottom: 10px; line-height: 1.6; }
-
         #logFeed { font-size: 11px; color: var(--text-dim); height: 80px; overflow-y: auto; padding: 8px; background: var(--bg); border-radius: 5px; border: 1px solid var(--border); }
         #logFeed .log-line { margin-bottom: 3px; }
         #logFeed .log-line.warn { color: var(--amber); }
         #logFeed .log-line.ok   { color: var(--accent); }
         #logFeed .log-line.err  { color: var(--red); }
 
-        .bump-flash { position: fixed; inset: 0; background: rgba(255,68,68,0.15); pointer-events: none; opacity: 0; z-index: 998; transition: opacity 0.1s; }
-        .bump-flash.active { opacity: 1; }
-
         .highlight       { color: var(--accent); }
         .highlight-amber { color: var(--amber); }
 
+        /* TABLET / LANDSCAPE DASHBOARD MODE */
+        @media (orientation: landscape) and (min-width: 600px) {
+            body { flex-direction: row; }
+            #map-wrapper { flex: 1; height: 100vh; border-bottom: none; border-right: 2px solid var(--accent-dim); }
+            .speed-hud { bottom: 30px; right: 30px; }
+            .speed-hud .val { font-size: 72px; }
+            .scroll-panel { flex: 0 0 360px; height: 100vh; padding-bottom: 20px; }
+            .controls { grid-template-columns: 1fr; }
+            .stats-row { grid-template-columns: repeat(2, 1fr); }
+        }
+        
         @media (max-width: 360px) {
             .stats-row   { grid-template-columns: repeat(2,1fr); }
             .sensor-grid { grid-template-columns: repeat(2,1fr); }
@@ -106,239 +117,254 @@
 
 <div class="bump-flash" id="bumpFlash"></div>
 
-<div class="header">
-    <h1>FIELDSURVEYOR</h1>
-    <span class="sub">City Telemetry Logger · v1</span>
-</div>
-
-<!-- APK DOWNLOAD — dynamically hidden when in App -->
-<a class="btn-apk" id="apkBanner"
-   href="https://github.com/Tammam-Alhadwah/FIELDSURVEYOR/releases/download/latest/app-debug.apk">
-    ↓ DOWNLOAD ANDROID APK
-</a>
-
-<div class="status-bar">
-    <span class="badge idle" id="badgeGPS">GPS: —</span>
-    <span class="badge idle" id="badgeMotion">IMU: —</span>
-    <span class="badge idle" id="badgeMag">MAG: —</span>
-    <span class="badge idle" id="badgeLight">LUX: —</span>
-    <span class="badge idle" id="badgeBattery">BAT: —</span>
-    <span class="badge idle" id="badgeNetwork">NET: —</span>
-    <span class="badge idle" id="badgeWakeLock">WAKE: —</span>
-</div>
-
-<div class="notice">
-    ⚠ <strong>GO OUTSIDE FIRST</strong> — GPS needs open sky (~15 sec to lock).
-    Badge turns green when ready. Records only save after lock is acquired.
-    Disable battery optimisation for this app in Android Settings.
-</div>
-
-<div class="controls">
-    <button class="btn btn-start"   id="startBtn">▶ START RECORDING</button>
-    <button class="btn btn-stop"    id="stopBtn">■ STOP RECORDING</button>
-    <button class="btn btn-dl"      id="downloadBtn">↓ EXPORT CSV</button>
-    <button class="btn btn-restore" id="restoreBtn">↺ RESTORE BACKUP</button>
-</div>
-
-<!-- TIMER -->
-<div class="panel">
-    <div class="panel-title">Session</div>
-    <div id="elapsedTimer">00:00:00</div>
-    <div class="coords" id="coordsDisplay">No GPS lock yet…</div>
-    <div class="gps-bar"><div class="gps-bar-fill" id="gpsBar" style="width:0%"></div></div>
-</div>
-
-<!-- STATS -->
-<div class="stats-row">
-    <div class="stat-box"><div class="s-val" id="statPoints">0</div><div class="s-lbl">Records</div></div>
-    <div class="stat-box"><div class="s-val" id="statDist">0.0</div><div class="s-lbl">km</div></div>
-    <div class="stat-box"><div class="s-val" id="statBumps">0</div><div class="s-lbl">Bumps</div></div>
-    <div class="stat-box"><div class="s-val" id="statMaxSpd">0</div><div class="s-lbl">Max km/h</div></div>
-</div>
-
-<!-- GPS -->
-<div class="panel">
-    <div class="panel-title">📍 GPS / Position</div>
-    <div class="sensor-grid">
-        <div class="sensor-cell mid">
-            <div class="label">Speed</div>
-            <div class="value" id="v-speed">0.0</div>
-            <div class="unit">km/h</div>
-        </div>
-        <div class="sensor-cell">
-            <div class="label">Heading</div>
-            <div class="value" id="v-heading">0</div>
-            <div class="unit">°</div>
-        </div>
-        <div class="sensor-cell mid">
-            <div class="label">Altitude</div>
-            <div class="value" id="v-altitude">—</div>
-            <div class="unit">m ASL</div>
-        </div>
-        <div class="sensor-cell">
-            <div class="label">Accuracy</div>
-            <div class="value" id="v-accuracy">—</div>
-            <div class="unit">m</div>
-        </div>
+<!-- V2 MAP TOP HALF -->
+<div id="map-wrapper">
+    <div id="map"></div>
+    <div class="map-overlay-header">
+        <h1>FIELDSURVEYOR</h1>
+        <span class="sub">V2 — As-Suwayda 3D Real-Time</span>
+    </div>
+    <div class="speed-hud">
+        <div class="val" id="hud-speed">0</div>
+        <div class="lbl">KM/H</div>
     </div>
 </div>
 
-<!-- ACCELEROMETER -->
-<div class="panel">
-    <div class="panel-title">📈 Accelerometer + Linear Accel (m/s²)</div>
-    <div class="sensor-grid">
-        <div class="sensor-cell">
-            <div class="label">Raw X</div>
-            <div class="value" id="v-ax">0.00</div>
+<!-- SCROLLABLE DASHBOARD BOTTOM HALF -->
+<div class="scroll-panel">
+
+    <!-- APK DOWNLOAD — dynamically hidden when in App -->
+    <a class="btn-apk" id="apkBanner"
+       href="https://github.com/Tammam-Alhadwah/FIELDSURVEYOR/releases/download/latest/app-debug.apk">
+        ↓ DOWNLOAD ANDROID APK
+    </a>
+
+    <div class="status-bar">
+        <span class="badge idle" id="badgeGPS">GPS: —</span>
+        <span class="badge idle" id="badgeMotion">IMU: —</span>
+        <span class="badge idle" id="badgeMag">MAG: —</span>
+        <span class="badge idle" id="badgeLight">LUX: —</span>
+        <span class="badge idle" id="badgeBattery">BAT: —</span>
+        <span class="badge idle" id="badgeNetwork">NET: —</span>
+        <span class="badge idle" id="badgeWakeLock">WAKE: —</span>
+    </div>
+
+    <div class="notice">
+        ⚠ <strong>GO OUTSIDE FIRST</strong> — GPS needs open sky (~15 sec to lock).
+        Badge turns green when ready. Records only save after lock is acquired.
+        Disable battery optimisation for this app in Android Settings.
+    </div>
+
+    <div class="controls">
+        <button class="btn btn-start"   id="startBtn">▶ START RECORDING</button>
+        <button class="btn btn-stop"    id="stopBtn">■ STOP RECORDING</button>
+        <button class="btn btn-dl"      id="downloadBtn">↓ EXPORT CSV</button>
+        <button class="btn btn-restore" id="restoreBtn">↺ RESTORE BACKUP</button>
+    </div>
+
+    <!-- TIMER -->
+    <div class="panel">
+        <div class="panel-title">Session</div>
+        <div id="elapsedTimer">00:00:00</div>
+        <div class="coords" id="coordsDisplay">No GPS lock yet…</div>
+        <div class="gps-bar"><div class="gps-bar-fill" id="gpsBar" style="width:0%"></div></div>
+    </div>
+
+    <!-- STATS -->
+    <div class="stats-row">
+        <div class="stat-box"><div class="s-val" id="statPoints">0</div><div class="s-lbl">Records</div></div>
+        <div class="stat-box"><div class="s-val" id="statDist">0.0</div><div class="s-lbl">km</div></div>
+        <div class="stat-box"><div class="s-val" id="statBumps">0</div><div class="s-lbl">Bumps</div></div>
+        <div class="stat-box"><div class="s-val" id="statMaxSpd">0</div><div class="s-lbl">Max km/h</div></div>
+    </div>
+
+    <!-- GPS -->
+    <div class="panel">
+        <div class="panel-title">📍 GPS / Position</div>
+        <div class="sensor-grid">
+            <div class="sensor-cell mid">
+                <div class="label">Speed</div>
+                <div class="value" id="v-speed">0.0</div>
+                <div class="unit">km/h</div>
+            </div>
+            <div class="sensor-cell">
+                <div class="label">Heading</div>
+                <div class="value" id="v-heading">0</div>
+                <div class="unit">°</div>
+            </div>
+            <div class="sensor-cell mid">
+                <div class="label">Altitude</div>
+                <div class="value" id="v-altitude">—</div>
+                <div class="unit">m ASL</div>
+            </div>
+            <div class="sensor-cell">
+                <div class="label">Accuracy</div>
+                <div class="value" id="v-accuracy">—</div>
+                <div class="unit">m</div>
+            </div>
         </div>
-        <div class="sensor-cell">
-            <div class="label">Raw Y</div>
-            <div class="value" id="v-ay">0.00</div>
+    </div>
+
+    <!-- ACCELEROMETER -->
+    <div class="panel">
+        <div class="panel-title">📈 Accelerometer + Linear Accel (m/s²)</div>
+        <div class="sensor-grid">
+            <div class="sensor-cell">
+                <div class="label">Raw X</div>
+                <div class="value" id="v-ax">0.00</div>
+            </div>
+            <div class="sensor-cell">
+                <div class="label">Raw Y</div>
+                <div class="value" id="v-ay">0.00</div>
+            </div>
+            <div class="sensor-cell">
+                <div class="label">Raw Z</div>
+                <div class="value" id="v-az">0.00</div>
+            </div>
+            <div class="sensor-cell v-blue">
+                <div class="label">Linear X</div>
+                <div class="value" id="v-lx">—</div>
+            </div>
+            <div class="sensor-cell v-blue">
+                <div class="label">Linear Y</div>
+                <div class="value" id="v-ly">—</div>
+            </div>
+            <div class="sensor-cell v-blue">
+                <div class="label">Linear Z</div>
+                <div class="value" id="v-lz">—</div>
+            </div>
+            <div class="sensor-cell wide">
+                <div class="label">Peak Magnitude this second</div>
+                <div class="value" id="v-mag">0.00</div>
+                <div class="unit">m/s² — bump fires at &gt;18</div>
+            </div>
         </div>
-        <div class="sensor-cell">
-            <div class="label">Raw Z</div>
-            <div class="value" id="v-az">0.00</div>
+    </div>
+
+    <!-- GYRO + ORIENTATION -->
+    <div class="panel">
+        <div class="panel-title">🔄 Gyroscope (°/s) + Orientation (°)</div>
+        <div class="sensor-grid">
+            <div class="sensor-cell">
+                <div class="label">Gyro α</div>
+                <div class="value" id="v-gx">0.00</div>
+            </div>
+            <div class="sensor-cell">
+                <div class="label">Gyro β</div>
+                <div class="value" id="v-gy">0.00</div>
+            </div>
+            <div class="sensor-cell">
+                <div class="label">Gyro γ</div>
+                <div class="value" id="v-gz">0.00</div>
+            </div>
+            <div class="sensor-cell">
+                <div class="label">Compass α</div>
+                <div class="value" id="v-oa">—</div>
+                <div class="unit">°</div>
+            </div>
+            <div class="sensor-cell">
+                <div class="label">Pitch β</div>
+                <div class="value" id="v-ob">—</div>
+                <div class="unit">°</div>
+            </div>
+            <div class="sensor-cell">
+                <div class="label">Roll γ</div>
+                <div class="value" id="v-og">—</div>
+                <div class="unit">°</div>
+            </div>
         </div>
-        <div class="sensor-cell v-blue">
-            <div class="label">Linear X</div>
-            <div class="value" id="v-lx">—</div>
+    </div>
+
+    <!-- MAGNETOMETER -->
+    <div class="panel">
+        <div class="panel-title">🧲 Magnetometer (µT)</div>
+        <div class="sensor-grid">
+            <div class="sensor-cell v-purple">
+                <div class="label">Mag X</div>
+                <div class="value" id="v-mx">—</div>
+                <div class="unit">µT</div>
+            </div>
+            <div class="sensor-cell v-purple">
+                <div class="label">Mag Y</div>
+                <div class="value" id="v-my">—</div>
+                <div class="unit">µT</div>
+            </div>
+            <div class="sensor-cell v-purple">
+                <div class="label">Mag Z</div>
+                <div class="value" id="v-mz">—</div>
+                <div class="unit">µT</div>
+            </div>
+            <div class="sensor-cell wide v-purple">
+                <div class="label">Total Field Strength</div>
+                <div class="value" id="v-mtotal">—</div>
+                <div class="unit">µT — Earth ~25–65 µT · Spikes = power lines / metal structures</div>
+            </div>
         </div>
-        <div class="sensor-cell v-blue">
-            <div class="label">Linear Y</div>
-            <div class="value" id="v-ly">—</div>
+    </div>
+
+    <!-- ABSOLUTE ORIENTATION -->
+    <div class="panel">
+        <div class="panel-title">🎯 Absolute Orientation — Sensor Fusion Quaternion</div>
+        <div class="sensor-grid">
+            <div class="sensor-cell v-amber">
+                <div class="label">Quat W</div>
+                <div class="value" id="v-qw">—</div>
+            </div>
+            <div class="sensor-cell v-amber">
+                <div class="label">Quat X</div>
+                <div class="value" id="v-qx">—</div>
+            </div>
+            <div class="sensor-cell v-amber">
+                <div class="label">Quat Y</div>
+                <div class="value" id="v-qy">—</div>
+            </div>
+            <div class="sensor-cell v-amber mid">
+                <div class="label">Quat Z</div>
+                <div class="value" id="v-qz">—</div>
+            </div>
+            <div class="sensor-cell">
+                <div class="label">Gravity Z</div>
+                <div class="value" id="v-gvz">—</div>
+            </div>
         </div>
-        <div class="sensor-cell v-blue">
-            <div class="label">Linear Z</div>
-            <div class="value" id="v-lz">—</div>
+    </div>
+
+    <!-- ENVIRONMENT -->
+    <div class="panel">
+        <div class="panel-title">🌐 Environment / System</div>
+        <div class="sensor-grid">
+            <div class="sensor-cell">
+                <div class="label">Battery</div>
+                <div class="value" id="v-bat">—</div>
+                <div class="unit" id="v-bat-status">—</div>
+            </div>
+            <div class="sensor-cell">
+                <div class="label">Network</div>
+                <div class="value" id="v-net">—</div>
+                <div class="unit" id="v-net-dl">—</div>
+            </div>
+            <div class="sensor-cell">
+                <div class="label">Net RTT</div>
+                <div class="value" id="v-rtt">—</div>
+                <div class="unit">ms</div>
+            </div>
+            <div class="sensor-cell wide v-amber">
+                <div class="label">Ambient Light</div>
+                <div class="value" id="v-lux">—</div>
+                <div class="unit">lux</div>
+            </div>
         </div>
-        <div class="sensor-cell wide">
-            <div class="label">Peak Magnitude this second</div>
-            <div class="value" id="v-mag">0.00</div>
-            <div class="unit">m/s² — bump fires at &gt;18</div>
-        </div>
+    </div>
+
+    <!-- LOG -->
+    <div class="panel">
+        <div class="panel-title">System Log</div>
+        <div id="logFeed"></div>
     </div>
 </div>
 
-<!-- GYRO + ORIENTATION -->
-<div class="panel">
-    <div class="panel-title">🔄 Gyroscope (°/s) + Orientation (°)</div>
-    <div class="sensor-grid">
-        <div class="sensor-cell">
-            <div class="label">Gyro α</div>
-            <div class="value" id="v-gx">0.00</div>
-        </div>
-        <div class="sensor-cell">
-            <div class="label">Gyro β</div>
-            <div class="value" id="v-gy">0.00</div>
-        </div>
-        <div class="sensor-cell">
-            <div class="label">Gyro γ</div>
-            <div class="value" id="v-gz">0.00</div>
-        </div>
-        <div class="sensor-cell">
-            <div class="label">Compass α</div>
-            <div class="value" id="v-oa">—</div>
-            <div class="unit">°</div>
-        </div>
-        <div class="sensor-cell">
-            <div class="label">Pitch β</div>
-            <div class="value" id="v-ob">—</div>
-            <div class="unit">°</div>
-        </div>
-        <div class="sensor-cell">
-            <div class="label">Roll γ</div>
-            <div class="value" id="v-og">—</div>
-            <div class="unit">°</div>
-        </div>
-    </div>
-</div>
-
-<!-- MAGNETOMETER -->
-<div class="panel">
-    <div class="panel-title">🧲 Magnetometer (µT)</div>
-    <div class="sensor-grid">
-        <div class="sensor-cell v-purple">
-            <div class="label">Mag X</div>
-            <div class="value" id="v-mx">—</div>
-            <div class="unit">µT</div>
-        </div>
-        <div class="sensor-cell v-purple">
-            <div class="label">Mag Y</div>
-            <div class="value" id="v-my">—</div>
-            <div class="unit">µT</div>
-        </div>
-        <div class="sensor-cell v-purple">
-            <div class="label">Mag Z</div>
-            <div class="value" id="v-mz">—</div>
-            <div class="unit">µT</div>
-        </div>
-        <div class="sensor-cell wide v-purple">
-            <div class="label">Total Field Strength</div>
-            <div class="value" id="v-mtotal">—</div>
-            <div class="unit">µT — Earth ~25–65 µT · Spikes = power lines / metal structures</div>
-        </div>
-    </div>
-</div>
-
-<!-- ABSOLUTE ORIENTATION -->
-<div class="panel">
-    <div class="panel-title">🎯 Absolute Orientation — Sensor Fusion Quaternion</div>
-    <div class="sensor-grid">
-        <div class="sensor-cell v-amber">
-            <div class="label">Quat W</div>
-            <div class="value" id="v-qw">—</div>
-        </div>
-        <div class="sensor-cell v-amber">
-            <div class="label">Quat X</div>
-            <div class="value" id="v-qx">—</div>
-        </div>
-        <div class="sensor-cell v-amber">
-            <div class="label">Quat Y</div>
-            <div class="value" id="v-qy">—</div>
-        </div>
-        <div class="sensor-cell v-amber mid">
-            <div class="label">Quat Z</div>
-            <div class="value" id="v-qz">—</div>
-        </div>
-        <div class="sensor-cell">
-            <div class="label">Gravity Z</div>
-            <div class="value" id="v-gvz">—</div>
-        </div>
-    </div>
-</div>
-
-<!-- ENVIRONMENT -->
-<div class="panel">
-    <div class="panel-title">🌐 Environment / System</div>
-    <div class="sensor-grid">
-        <div class="sensor-cell">
-            <div class="label">Battery</div>
-            <div class="value" id="v-bat">—</div>
-            <div class="unit" id="v-bat-status">—</div>
-        </div>
-        <div class="sensor-cell">
-            <div class="label">Network</div>
-            <div class="value" id="v-net">—</div>
-            <div class="unit" id="v-net-dl">—</div>
-        </div>
-        <div class="sensor-cell">
-            <div class="label">Net RTT</div>
-            <div class="value" id="v-rtt">—</div>
-            <div class="unit">ms</div>
-        </div>
-        <div class="sensor-cell wide v-amber">
-            <div class="label">Ambient Light</div>
-            <div class="value" id="v-lux">—</div>
-            <div class="unit">lux</div>
-        </div>
-    </div>
-</div>
-
-<!-- LOG -->
-<div class="panel">
-    <div class="panel-title">System Log</div>
-    <div id="logFeed"></div>
-</div>
+<!-- MapLibre JS (CDN) -->
+<script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
 
 <script>
 'use strict';
@@ -381,6 +407,78 @@ let luxValue  = null;
 // Environment
 let batLevel = null, batCharging = null;
 let netType = null, netEffType = null, netDownlink = null, netRTT = null;
+
+// ═══════════════════════════════════════════════════
+//  MAPLIBRE V2 INITIALIZATION
+// ═══════════════════════════════════════════════════
+let map;
+let mapLoaded = false;
+let geojsonRoute = { type: 'Feature', geometry: { type: 'LineString', coordinates:[] } };
+let geojsonBumps = { type: 'FeatureCollection', features:[] };
+
+function initMap() {
+    map = new maplibregl.Map({
+        container: 'map',
+        style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+        center:[36.57, 32.71], // Default As-Suwayda
+        zoom: 16,
+        pitch: 60,
+        bearing: 0,
+        antialias: true
+    });
+
+    map.on('load', () => {
+        mapLoaded = true;
+        log('3D Map Engine Loaded', 'ok');
+
+        map.addSource('routeSource', { type: 'geojson', data: geojsonRoute });
+        map.addLayer({
+            id: 'routeLayer',
+            type: 'line',
+            source: 'routeSource',
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: { 
+                'line-color': '#39ff84', 
+                'line-width': 6, 
+                'line-opacity': 0.8,
+                'line-blur': 1
+            }
+        });
+
+        map.addSource('bumpSource', { type: 'geojson', data: geojsonBumps });
+        map.addLayer({
+            id: 'bumpLayer',
+            type: 'circle',
+            source: 'bumpSource',
+            paint: { 
+                'circle-radius': 10, 
+                'circle-color': '#ff4444', 
+                'circle-stroke-width': 2, 
+                'circle-stroke-color': '#000',
+                'circle-opacity': 0.9
+            }
+        });
+    });
+}
+
+function mapFollowCar(kmh) {
+    if (!mapLoaded || gps.lat === 0) return;
+    
+    // Only rotate map if we are moving faster than 4km/h
+    let currentBearing = map.getBearing();
+    if (kmh > 4 && gps.heading !== null) {
+        currentBearing = gps.heading;
+    }
+
+    map.easeTo({
+        center: [gps.lng, gps.lat],
+        bearing: currentBearing,
+        pitch: 60,
+        zoom: 17.5,
+        duration: 1000,
+        easing: t => t
+    });
+}
 
 // ═══════════════════════════════════════════════════
 //  HELPERS
@@ -646,6 +744,11 @@ function handleGPS(pos) {
         acc:     c.accuracy,
         altAcc:  c.altitudeAccuracy
     };
+    
+    // Jump map to first fix
+    if (prevLat === 0 && mapLoaded) {
+        map.jumpTo({ center:[gps.lng, gps.lat], zoom: 16 });
+    }
 
     const kmh = gps.speed * 3.6;
     if (kmh > maxSpeedKmh) {
@@ -686,6 +789,14 @@ async function startRecording() {
     bumpCount          = 0;
     maxSpeedKmh        = 0;
     prevLat = prevLng  = 0;
+    
+    // Reset Map Layers
+    geojsonRoute.geometry.coordinates =[];
+    geojsonBumps.features =[];
+    if (mapLoaded) {
+        map.getSource('routeSource').setData(geojsonRoute);
+        map.getSource('bumpSource').setData(geojsonBumps);
+    }
 
     document.getElementById('startBtn').style.display    = 'none';
     document.getElementById('stopBtn').style.display     = 'block';
@@ -725,20 +836,59 @@ async function startRecording() {
         const isBump  = peakMag > BUMP_THRESHOLD;
         magBuffer =[];
 
-        if (isBump) {
+        const kmh = gps.speed * 3.6;
+        const magTotal = magSensor.x !== null
+            ? Math.sqrt(magSensor.x**2 + magSensor.y**2 + magSensor.z**2)
+            : null;
+
+        // --- MAP AND HUD UPDATES ---
+        document.getElementById('hud-speed').textContent = Math.round(kmh);
+        mapFollowCar(kmh);
+
+        if (isBump && gps.lat !== 0) {
             bumpCount++;
             document.getElementById('statBumps').textContent = bumpCount;
             const flash = document.getElementById('bumpFlash');
             flash.classList.add('active');
             setTimeout(() => flash.classList.remove('active'), 200);
+            
+            if (mapLoaded) {
+                geojsonBumps.features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [gps.lng, gps.lat] } });
+                map.getSource('bumpSource').setData(geojsonBumps);
+            }
             log(`⚠ BUMP! peak=${peakMag.toFixed(1)} m/s²`, 'warn');
         }
+        
+        // Draw Route Trail
+        if (gps.lat !== 0 && mapLoaded) {
+            geojsonRoute.geometry.coordinates.push([gps.lng, gps.lat]);
+            map.getSource('routeSource').setData(geojsonRoute);
+        }
 
-        const kmh      = gps.speed * 3.6;
-        const magTotal = magSensor.x !== null
-            ? Math.sqrt(magSensor.x**2 + magSensor.y**2 + magSensor.z**2)
-            : null;
+        // --- HTML PANEL UPDATES ---
+        document.getElementById('statPoints').textContent = recordedData.length;
+        document.getElementById('coordsDisplay').innerHTML =
+            `<span class="highlight">${fmt(gps.lat,5)}°N, ${fmt(gps.lng,5)}°E</span>` +
+            (gps.alt ? `  <span class="highlight-amber">alt ${fmt(gps.alt,0)}m</span>` : '');
 
+        document.getElementById('v-speed').textContent    = kmh.toFixed(1);
+        document.getElementById('v-heading').textContent  = fmt(gps.heading, 0);
+        document.getElementById('v-altitude').textContent = gps.alt ? fmt(gps.alt, 0) : '—';
+        document.getElementById('v-accuracy').textContent = gps.acc ? fmt(gps.acc, 0) : '—';
+
+        document.getElementById('v-ax').textContent  = fmt(accelX, 2);
+        document.getElementById('v-ay').textContent  = fmt(accelY, 2);
+        document.getElementById('v-az').textContent  = fmt(accelZ, 2);
+        document.getElementById('v-lx').textContent  = linAccel.x !== null ? fmt(linAccel.x, 2) : '—';
+        document.getElementById('v-ly').textContent  = linAccel.y !== null ? fmt(linAccel.y, 2) : '—';
+        document.getElementById('v-lz').textContent  = linAccel.z !== null ? fmt(linAccel.z, 2) : '—';
+        document.getElementById('v-mag').textContent = peakMag.toFixed(2);
+
+        document.getElementById('v-gx').textContent = fmt(gyroX, 2);
+        document.getElementById('v-gy').textContent = fmt(gyroY, 2);
+        document.getElementById('v-gz').textContent = fmt(gyroZ, 2);
+
+        // --- FULL CSV DATA OBJECT ---
         const dp = {
             timestamp:         ts,
             elapsed_s:         elapsed,
@@ -784,28 +934,6 @@ async function startRecording() {
 
         if (gps.lat !== 0) recordedData.push(dp);
 
-        document.getElementById('statPoints').textContent = recordedData.length;
-        document.getElementById('coordsDisplay').innerHTML =
-            `<span class="highlight">${fmt(gps.lat,5)}°N, ${fmt(gps.lng,5)}°E</span>` +
-            (gps.alt ? `  <span class="highlight-amber">alt ${fmt(gps.alt,0)}m</span>` : '');
-
-        document.getElementById('v-speed').textContent    = kmh.toFixed(1);
-        document.getElementById('v-heading').textContent  = fmt(gps.heading, 0);
-        document.getElementById('v-altitude').textContent = gps.alt ? fmt(gps.alt, 0) : '—';
-        document.getElementById('v-accuracy').textContent = gps.acc ? fmt(gps.acc, 0) : '—';
-
-        document.getElementById('v-ax').textContent  = fmt(accelX, 2);
-        document.getElementById('v-ay').textContent  = fmt(accelY, 2);
-        document.getElementById('v-az').textContent  = fmt(accelZ, 2);
-        document.getElementById('v-lx').textContent  = linAccel.x !== null ? fmt(linAccel.x, 2) : '—';
-        document.getElementById('v-ly').textContent  = linAccel.y !== null ? fmt(linAccel.y, 2) : '—';
-        document.getElementById('v-lz').textContent  = linAccel.z !== null ? fmt(linAccel.z, 2) : '—';
-        document.getElementById('v-mag').textContent = peakMag.toFixed(2);
-
-        document.getElementById('v-gx').textContent = fmt(gyroX, 2);
-        document.getElementById('v-gy').textContent = fmt(gyroY, 2);
-        document.getElementById('v-gz').textContent = fmt(gyroZ, 2);
-
         if (recordedData.length > 0 && recordedData.length % 60 === 0) {
             try {
                 localStorage.setItem(SESSION_KEY, JSON.stringify({ ts, data: recordedData }));
@@ -827,7 +955,6 @@ document.getElementById('stopBtn').addEventListener('click', () => {
     window.removeEventListener('deviceorientation', handleOrientation);
     if (wakeLock && !wakeLock.released) wakeLock.release();
 
-    // Turn off native magnetometer if active
     if (window.Capacitor?.Plugins?.Sensors) {
         window.Capacitor.Plugins.Sensors.stop({ type: 'MAGNETOMETER' });
     }
@@ -844,9 +971,7 @@ document.getElementById('stopBtn').addEventListener('click', () => {
 
     document.getElementById('startBtn').style.display    = 'block';
     document.getElementById('stopBtn').style.display     = 'none';
-    document.getElementById('downloadBtn').style.display = 'block';
-
-    ['badgeMotion','badgeWakeLock','badgeMag','badgeLight'].forEach(id => setBadge(id, id + ': OFF', 'idle'));
+    document.getElementById('downloadBtn').style.display = 'block';['badgeMotion','badgeWakeLock','badgeMag','badgeLight'].forEach(id => setBadge(id, id + ': OFF', 'idle'));
 
     log(`Done — ${recordedData.length} records · ${totalDistKm.toFixed(2)} km · ${bumpCount} bumps · ${h}h${m}m${s}s`, 'ok');
     document.getElementById('coordsDisplay').innerHTML =
@@ -861,36 +986,28 @@ document.getElementById('downloadBtn').addEventListener('click', async () => {
     
     const csv = Object.keys(recordedData[0]).join(',') + '\n' +
                 recordedData.map(r => Object.values(r).join(',')).join('\n');
-    const fileName = `survey_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.csv`;
+    const fileName = `survey_v2_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.csv`;
 
-    // 📱 NATIVE ANDROID EXPORT
     if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
         try {
             const { Filesystem, Share } = window.Capacitor.Plugins;
-            
-            // 1. Write the file to the app's internal cache directory
             const result = await Filesystem.writeFile({
                 path: fileName,
                 data: csv,
-                directory: 'CACHE', // CACHE doesn't require extra Android permissions!
+                directory: 'CACHE',
                 encoding: 'utf8'
             });
-
-            // 2. Open the native Android Share menu
             await Share.share({
                 title: 'Export Survey Data',
                 text: 'Here is the exported CSV from FieldSurveyor.',
                 url: result.uri,
                 dialogTitle: 'Save or Share CSV'
             });
-            
             log('CSV shared successfully', 'ok');
         } catch (e) {
             log('Export failed: ' + e.message, 'err');
         }
-    } 
-    // 💻 STANDARD WEB EXPORT (For GitHub Pages website)
-    else {
+    } else {
         const a = Object.assign(document.createElement('a'), {
             href:     URL.createObjectURL(new Blob([csv], { type: 'text/csv' })),
             download: fileName
@@ -900,7 +1017,6 @@ document.getElementById('downloadBtn').addEventListener('click', async () => {
         log('CSV exported: ' + recordedData.length + ' rows', 'ok');
     }
 });
-
 
 // ═══════════════════════════════════════════════════
 //  BACKUP / RESTORE
@@ -934,10 +1050,11 @@ document.getElementById('restoreBtn').addEventListener('click', () => {
 document.getElementById('startBtn').addEventListener('click', startRecording);
 
 (async () => {
+    initMap();
     initNetwork();
     await initBattery();
     checkBackup();
-    log('FieldSurveyor v1 ready — go outside and press START', 'ok');
+    log('FieldSurveyor V2 ready — go outside and press START', 'ok');
 })();
 
 if ('serviceWorker' in navigator) {
