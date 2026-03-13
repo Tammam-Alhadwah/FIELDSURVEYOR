@@ -7,12 +7,12 @@
     "open": "npx cap open android"
   },
   "dependencies": {
-    "@capacitor/android": "6.x",
-    "@capacitor/app":     "6.x",
-    "@capacitor/core":    "6.x",
+    "@capacitor/android": "7.x",
+    "@capacitor/app":     "7.x",
+    "@capacitor/core":    "7.x",
     "@danyalwe/capacitor-sensors": "^1.0.1"
   },
   "devDependencies": {
-    "@capacitor/cli": "6.x"
+    "@capacitor/cli": "7.x"
   }
 }
