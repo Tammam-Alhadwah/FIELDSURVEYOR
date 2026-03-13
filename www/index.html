@@ -33,6 +33,20 @@
         .map-overlay-header h1 { font-family: var(--display); font-size: 22px; font-weight: 900; letter-spacing: 0.05em; color: var(--accent); text-shadow: 0 0 10px rgba(57,255,132,0.4); margin-bottom: 2px;}
         .map-overlay-header .sub { font-size: 9px; color: var(--text-dim); letter-spacing: 0.15em; text-transform: uppercase; }
 
+        .map-btn {
+            position: absolute; top: 10px; z-index: 20;
+            background: rgba(8,12,10,0.8); border: 1px solid var(--border);
+            padding: 8px 12px; border-radius: 6px; cursor: pointer;
+            font-family: var(--display); font-size: 14px; font-weight: 700; letter-spacing: 0.1em;
+            backdrop-filter: blur(5px); transition: all 0.2s;
+        }
+        .map-btn:active { transform: scale(0.95); }
+        
+        /* When HUD is active, hide the dashboard and expand the map */
+        body.hud-active .scroll-panel { display: none !important; }
+        body.hud-active #map-wrapper { height: 100vh !important; flex: 1 1 100% !important; border: none !important; }
+        body.hud-active .map-overlay-header { background: transparent; border: none; }
+
         .speed-hud { position: absolute; bottom: 15px; right: 15px; z-index: 10; text-align: right; text-shadow: 0 0 10px #000; }
         .speed-hud .val { font-family: var(--display); font-size: 48px; font-weight: 900; color: #fff; line-height: 1; }
         .speed-hud .lbl { font-size: 12px; color: var(--accent); font-weight: 700; letter-spacing: 0.1em; }
@@ -124,6 +138,11 @@
         <h1>FIELDSURVEYOR</h1>
         <span class="sub">V2 — As-Suwayda 3D Real-Time</span>
     </div>
+    
+    <!-- NEW: Map Controls -->
+    <button id="camToggleBtn" class="map-btn" style="right: 80px; color: var(--accent);">🎥 FOLLOW</button>
+    <button id="hudToggleBtn" class="map-btn" style="right: 10px; color: var(--text);">⛶ HUD</button>
+
     <div class="speed-hud">
         <div class="val" id="hud-speed">0</div>
         <div class="lbl">KM/H</div>
@@ -428,6 +447,23 @@ function initMap() {
         antialias: true
     });
 
+    // --- AUTO-UNLOCK ON HUMAN TOUCH ---
+    const unlockCamera = (e) => {
+        // e.originalEvent proves a human touched the screen (ignores GPS script movements)
+        if (cameraFollow && e.originalEvent) {
+            cameraFollow = false;
+            const camBtn = document.getElementById('camToggleBtn');
+            camBtn.textContent = '🎥 FREE-LOOK';
+            camBtn.style.color = 'var(--amber)';
+        }
+    };
+    
+    // Listen for swiping, pinching, rotating, and 3D pitching
+    map.on('dragstart', unlockCamera);
+    map.on('zoomstart', unlockCamera);
+    map.on('rotatestart', unlockCamera);
+    map.on('pitchstart', unlockCamera);
+
     map.on('load', () => {
         mapLoaded = true;
         log('3D Map Engine Loaded', 'ok');
@@ -521,8 +557,9 @@ function mapFollowCar(kmh) {
     // UPDATE GLOWING CAR POSITION
     geojsonCar.geometry.coordinates =[gps.lng, gps.lat];
     map.getSource('carSource').setData(geojsonCar);
-
-    // --- NEW: DYNAMIC ZOOM MATH ---
+    // --- SKIP CAMERA MOVE IF IN FREE-LOOK MODE ---
+    if (!cameraFollow) return;
+    // --- DYNAMIC ZOOM MATH ---
     // If stopped (0 kmh) -> Zoom in close (18.5)
     // If fast (60+ kmh)  -> Zoom out to see the road ahead (16.0)
     let targetZoom = 18.5 - (kmh / 60) * 2.5;
@@ -1161,6 +1198,29 @@ document.getElementById('restoreBtn').addEventListener('click', () => {
         log(`Restored ${recordedData.length} records`, 'ok');
     } catch (e) { log('Restore failed', 'err'); }
 });
+
+// ═══════════════════════════════════════════════════
+//  MAP CONTROLS (HUD & CAMERA)
+// ═══════════════════════════════════════════════════
+let cameraFollow = true;
+
+// Toggle HUD Mode
+document.getElementById('hudToggleBtn').addEventListener('click', (e) => {
+    document.body.classList.toggle('hud-active');
+    e.target.style.color = document.body.classList.contains('hud-active') ? 'var(--accent)' : 'var(--text)';
+    // Tell MapLibre the screen size changed so it recalculates the WebGL canvas
+    setTimeout(() => { if (mapLoaded) map.resize(); }, 150); 
+});
+
+// Toggle Camera Follow
+const camBtn = document.getElementById('camToggleBtn');
+camBtn.addEventListener('click', () => {
+    cameraFollow = !cameraFollow;
+    camBtn.textContent = cameraFollow ? '🎥 FOLLOW' : '🎥 FREE-LOOK';
+    camBtn.style.color = cameraFollow ? 'var(--accent)' : 'var(--amber)';
+    if (cameraFollow && gps.lat !== 0) mapFollowCar(gps.speed * 3.6); // Snap back immediately
+});
+
 
 // ═══════════════════════════════════════════════════
 //  BOOT
