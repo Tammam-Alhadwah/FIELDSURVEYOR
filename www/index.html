@@ -575,26 +575,31 @@ function fmt(v, d = 2) {
     return (v !== null && v !== undefined && v !== '') ? parseFloat(v).toFixed(d) : '';
 }
 
-// --- CRASH-PROOF VOICE TELEMETRY ---
-function speak(text) {
+
+async function speak(text) {
     try {
-        if ('speechSynthesis' in window) {
-            window.speechSynthesis.cancel(); // Clear any stuck speech
+        // 📱 NATIVE APK VOICE
+        if (window.Capacitor?.isNativePlatform?.() && window.Capacitor.Plugins.TextToSpeech) {
+            await window.Capacitor.Plugins.TextToSpeech.speak({
+                text: text,
+                rate: 1.0,
+                pitch: 0.9,
+                volume: 1.0
+            });
+        } 
+        // 💻 WEB BROWSER VOICE
+        else if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(text);
-            utterance.rate = 1.0;
-            utterance.pitch = 0.9;
-            
-            // Safely try to find an English voice
+            utterance.rate = 1.0; utterance.pitch = 0.9;
             try {
                 let voices = window.speechSynthesis.getVoices();
                 const englishVoice = voices.find(v => v.lang.includes('en') && v.name.includes('Google'));
                 if (englishVoice) utterance.voice = englishVoice;
-            } catch(e) {} // Ignore voice search errors
-
+            } catch(e) {}
             window.speechSynthesis.speak(utterance);
         }
     } catch (e) {
-        // If TTS fails completely, just fail silently without breaking the app
         console.warn('Speech failed:', e);
     }
 }

@@ -12,7 +12,8 @@
     "@capacitor/core":    "7.x",
     "@capacitor/filesystem": "7.x",
     "@capacitor/share": "7.x",
-    "@danyalwe/capacitor-sensors": "^1.0.1"
+    "@danyalwe/capacitor-sensors": "^1.0.1",
+    "@capacitor-community/text-to-speech": "5.x"
   },
   "devDependencies": {
     "@capacitor/cli": "7.x"
