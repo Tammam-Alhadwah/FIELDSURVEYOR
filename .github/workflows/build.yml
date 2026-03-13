@@ -35,13 +35,42 @@ jobs:
           node -e "
             const fs = require('fs');
             const file = 'android/app/src/main/AndroidManifest.xml';
+
+            if (!fs.existsSync(file)) {
+              console.error('ERROR: AndroidManifest.xml not found at ' + file);
+              process.exit(1);
+            }
+
             let xml = fs.readFileSync(file, 'utf8');
-            xml = xml.replace('</manifest>', 
-              '    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />\n' +
-              '    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />\n' +
-              '</manifest>'
-            );
-            fs.writeFileSync(file, xml);
+
+            const permissions = [
+              'android.permission.ACCESS_COARSE_LOCATION',
+              'android.permission.ACCESS_FINE_LOCATION'
+            ];
+
+            let changed = false;
+            for (const perm of permissions) {
+              if (xml.includes(perm)) {
+                console.log('SKIP (already present): ' + perm);
+              } else {
+                const tag = '    <uses-permission android:name=\"' + perm + '\" />';
+                // Insert before </manifest> — fail loudly if the closing tag is missing.
+                if (!xml.includes('</manifest>')) {
+                  console.error('ERROR: </manifest> closing tag not found. Manifest may be malformed.');
+                  process.exit(1);
+                }
+                xml = xml.replace('</manifest>', tag + '\n</manifest>');
+                console.log('INJECTED: ' + perm);
+                changed = true;
+              }
+            }
+
+            if (changed) {
+              fs.writeFileSync(file, xml);
+              console.log('AndroidManifest.xml updated successfully.');
+            } else {
+              console.log('AndroidManifest.xml unchanged — all permissions were already present.');
+            }
           "
 
       - uses: actions/setup-java@v4
