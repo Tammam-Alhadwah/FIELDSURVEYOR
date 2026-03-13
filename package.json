@@ -10,8 +10,7 @@
     "@capacitor/android": "6.x",
     "@capacitor/app":     "6.x",
     "@capacitor/core":    "6.x",
-    "@transistorsoft/capacitor-background-geolocation": "^5.x",
-    "@transistorsoft/capacitor-background-fetch": "^3.x"
+    "@danyalwe/capacitor-sensors": "^1.0.1"
   },
   "devDependencies": {
     "@capacitor/cli": "6.x"

@@ -30,6 +30,20 @@ jobs:
       - name: Sync web files into Android
         run: npx cap sync android
 
+      - name: Inject Android Location Permissions
+        run: |
+          node -e "
+            const fs = require('fs');
+            const file = 'android/app/src/main/AndroidManifest.xml';
+            let xml = fs.readFileSync(file, 'utf8');
+            xml = xml.replace('</manifest>', 
+              '    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />\n' +
+              '    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />\n' +
+              '</manifest>'
+            );
+            fs.writeFileSync(file, xml);
+          "
+
       - uses: actions/setup-java@v4
         with:
           java-version: 17

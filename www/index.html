@@ -111,9 +111,9 @@
     <span class="sub">City Telemetry Logger · v1</span>
 </div>
 
-<!-- APK DOWNLOAD — only shown when not running as installed APK -->
+<!-- APK DOWNLOAD — dynamically hidden when in App -->
 <a class="btn-apk" id="apkBanner"
-   href="https://github.com/Tammam-Alhadwah/FIELDSURVEYOR/releases/latest/download/app-debug.apk">
+   href="https://github.com/Tammam-Alhadwah/FIELDSURVEYOR/releases/download/latest/app-debug.apk">
     ↓ DOWNLOAD ANDROID APK
 </a>
 
@@ -343,8 +343,11 @@
 <script>
 'use strict';
 
-// Hide APK download button when running as installed app
-if (window.matchMedia('(display-mode: standalone)').matches) {
+// Hide APK download button when running as installed app (PWA or Capacitor APK)
+const isPWA = window.matchMedia('(display-mode: standalone)').matches;
+const isCapacitor = !!window.Capacitor;
+
+if (isPWA || isCapacitor) {
     const b = document.getElementById('apkBanner');
     if (b) b.style.display = 'none';
 }
@@ -355,7 +358,7 @@ if (window.matchMedia('(display-mode: standalone)').matches) {
 const SESSION_KEY    = 'fieldsurveyor_v1';
 const BUMP_THRESHOLD = 18; // m/s²
 
-let isRecording = false, recordedData = [], geoWatchId, recordingInterval;
+let isRecording = false, recordedData =[], geoWatchId, recordingInterval;
 let recordingStartTime = 0, wakeLock = null;
 
 // GPS
@@ -366,9 +369,9 @@ let prevLat = 0, prevLng = 0, totalDistKm = 0, maxSpeedKmh = 0;
 let accelX = 0, accelY = 0, accelZ = 0;
 let gyroX  = 0, gyroY  = 0, gyroZ  = 0;
 let orientAlpha = 0, orientBeta = 0, orientGamma = 0;
-let magBuffer = [], bumpCount = 0;
+let magBuffer =[], bumpCount = 0;
 
-// Generic Sensor API (Capacitor APK only)
+// Generic Sensor API & Capacitor Plugins
 let linAccel  = { x:null, y:null, z:null };
 let magSensor = { x:null, y:null, z:null };
 let absSensor = { w:null, x:null, y:null, z:null };
@@ -487,7 +490,7 @@ document.addEventListener('visibilitychange', async () => {
 });
 
 // ═══════════════════════════════════════════════════
-//  GENERIC SENSOR API (Capacitor APK only)
+//  GENERIC SENSOR API & PLUGINS
 // ═══════════════════════════════════════════════════
 function initGenericSensors() {
 
@@ -501,7 +504,30 @@ function initGenericSensors() {
         } catch (e) { log('LinearAccel: ' + e.message, 'warn'); }
     } else { log('LinearAccelerationSensor: not available', 'warn'); }
 
-    if ('Magnetometer' in window) {
+    // 🧲 NATIVE / WEB MAGNETOMETER
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Sensors) {
+        const Sensors = window.Capacitor.Plugins.Sensors;
+        Sensors.init({ type: 'MAGNETOMETER' }).then(() => {
+            Sensors.start({ type: 'MAGNETOMETER' });
+            
+            Sensors.addListener('MAGNETOMETER', (data) => {
+                magSensor = { x: data.values[0], y: data.values[1], z: data.values[2] };
+                const total = Math.sqrt(magSensor.x**2 + magSensor.y**2 + magSensor.z**2);
+                
+                document.getElementById('v-mx').textContent     = magSensor.x.toFixed(1);
+                document.getElementById('v-my').textContent     = magSensor.y.toFixed(1);
+                document.getElementById('v-mz').textContent     = magSensor.z.toFixed(1);
+                document.getElementById('v-mtotal').textContent = total.toFixed(1);
+                setBadge('badgeMag', `MAG: ${total.toFixed(0)}µT`, 'ok');
+            });
+            setBadge('badgeMag', 'MAG: ON', 'ok');
+            log('Native Magnetometer: active', 'ok');
+        }).catch(e => {
+            setBadge('badgeMag', 'MAG: ERR', 'err');
+            log('Native Magnetometer failed: ' + e.message, 'warn');
+        });
+
+    } else if ('Magnetometer' in window) {
         try {
             const s = new Magnetometer({ frequency: 5 });
             s.addEventListener('reading', () => {
@@ -519,7 +545,7 @@ function initGenericSensors() {
             });
             s.start();
             setBadge('badgeMag', 'MAG: ON', 'ok');
-            log('Magnetometer: active', 'ok');
+            log('Web Magnetometer: active', 'ok');
         } catch (e) {
             setBadge('badgeMag', 'MAG: N/A', 'idle');
             log('Magnetometer: ' + e.message, 'warn');
@@ -654,7 +680,7 @@ async function startRecording() {
     }
 
     isRecording        = true;
-    recordedData       = [];
+    recordedData       =[];
     recordingStartTime = Date.now();
     totalDistKm        = 0;
     bumpCount          = 0;
@@ -697,7 +723,7 @@ async function startRecording() {
         const peakMag = magBuffer.length ? Math.max(...magBuffer) : 0;
         const avgMag  = magBuffer.length ? magBuffer.reduce((a, b) => a + b, 0) / magBuffer.length : 0;
         const isBump  = peakMag > BUMP_THRESHOLD;
-        magBuffer = [];
+        magBuffer =[];
 
         if (isBump) {
             bumpCount++;
@@ -800,6 +826,11 @@ document.getElementById('stopBtn').addEventListener('click', () => {
     window.removeEventListener('devicemotion',      handleMotion);
     window.removeEventListener('deviceorientation', handleOrientation);
     if (wakeLock && !wakeLock.released) wakeLock.release();
+
+    // Turn off native magnetometer if active
+    if (window.Capacitor?.Plugins?.Sensors) {
+        window.Capacitor.Plugins.Sensors.stop({ type: 'MAGNETOMETER' });
+    }
 
     if (recordedData.length > 0) {
         try { localStorage.setItem(SESSION_KEY, JSON.stringify({ ts: new Date().toISOString(), data: recordedData })); }
