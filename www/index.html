@@ -230,7 +230,7 @@
     </div>
 
     <div class="speed-hud">
-        <div class="val" id="hud-speed">0</div>
+    <div class="val" id="hud-speed">—</div>
         <div class="lbl">KM/H</div>
     </div>
 </div>
@@ -512,7 +512,7 @@ function initMap() {
         center: [36.57, 32.71],
         zoom: 16, pitch: 60, bearing: 0, antialias: true
     });
-
+    
     const unlockCamera = (e) => {
         if (cameraFollow && e.originalEvent) {
             cameraFollow = false;
@@ -609,11 +609,11 @@ function initMap() {
         // ── 4. CAR MARKER ──
         map.addSource('carSource', { type: 'geojson', data: geojsonCar });
         map.addLayer({
-            id: 'carGlowLayer', type: 'circle', source: 'carSource',
+            id: 'carGlowLayer', layout: { visibility: 'none' }, type: 'circle', source: 'carSource',
             paint: { 'circle-radius': 20, 'circle-color': '#39ff84', 'circle-blur': 1, 'circle-opacity': 0.4, 'circle-pitch-alignment': 'map' }
         });
         map.addLayer({
-            id: 'carLayer', type: 'circle', source: 'carSource',
+            id: 'carLayer', layout: { visibility: 'none' },type: 'circle', source: 'carSource',
             paint: { 'circle-radius': 8, 'circle-color': '#39ff84', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff', 'circle-pitch-alignment': 'map' }
         });
 
@@ -917,6 +917,9 @@ function handleGPS(pos) {
     };
 
     if (prevLat === 0 && mapLoaded) {
+        // First fix — make car visible and snap map
+        map.setLayoutProperty('carLayer',     'visibility', 'visible');
+        map.setLayoutProperty('carGlowLayer', 'visibility', 'visible');
         map.jumpTo({ center: [gps.lng, gps.lat], zoom: 16 });
         speak('GPS lock acquired. Route mapping initiated.');
     }
@@ -1146,6 +1149,7 @@ document.getElementById('stopBtn').addEventListener('click', () => {
     document.getElementById('startBtn').style.display    = 'block';
     document.getElementById('stopBtn').style.display     = 'none';
     document.getElementById('downloadBtn').style.display = 'block';
+    document.getElementById('hud-speed').textContent = '—';
 
     // FIX: separate the statement so forEach actually runs
     ['badgeMotion', 'badgeWakeLock', 'badgeMag', 'badgeLight'].forEach(id =>
