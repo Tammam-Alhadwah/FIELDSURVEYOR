@@ -6,7 +6,7 @@
   "background_color": "#080c0a",
   "theme_color": "#39ff84",
   "orientation": "portrait",
-  "icons":[
+  "icons": [
     {
       "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='192' height='192'><rect width='192' height='192' fill='%23080c0a'/><circle cx='96' cy='96' r='70' fill='none' stroke='%2339ff84' stroke-width='8'/><circle cx='96' cy='96' r='12' fill='%2339ff84'/><line x1='96' y1='26' x2='96' y2='60' stroke='%2339ff84' stroke-width='5'/></svg>",
       "sizes": "192x192",

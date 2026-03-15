@@ -11,7 +11,7 @@ permissions:
 
 jobs:
 
-  # ── 1. Build the Android APK ──────────────────────
+  # ── 1. Build the Android APK ──────────────────────────────────────────────
   build-apk:
     runs-on: ubuntu-latest
     steps:
@@ -54,9 +54,8 @@ jobs:
                 console.log('SKIP (already present): ' + perm);
               } else {
                 const tag = '    <uses-permission android:name=\"' + perm + '\" />';
-                // Insert before </manifest> — fail loudly if the closing tag is missing.
                 if (!xml.includes('</manifest>')) {
-                  console.error('ERROR: </manifest> closing tag not found. Manifest may be malformed.');
+                  console.error('ERROR: </manifest> closing tag not found.');
                   process.exit(1);
                 }
                 xml = xml.replace('</manifest>', tag + '\n</manifest>');
@@ -69,7 +68,7 @@ jobs:
               fs.writeFileSync(file, xml);
               console.log('AndroidManifest.xml updated successfully.');
             } else {
-              console.log('AndroidManifest.xml unchanged — all permissions were already present.');
+              console.log('AndroidManifest.xml unchanged — all permissions already present.');
             }
           "
 
@@ -91,7 +90,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ── 2. Deploy GitHub Pages from www/ ─────────────
+  # ── 2. Deploy GitHub Pages from www/ ─────────────────────────────────────
   deploy-pages:
     runs-on: ubuntu-latest
     environment:
@@ -99,12 +98,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/configure-pages@v4
-
       - uses: actions/upload-pages-artifact@v3
         with:
           path: www/
-
       - id: deployment
         uses: actions/deploy-pages@v4

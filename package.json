@@ -1,17 +1,17 @@
 {
   "name": "fieldsurveyor",
-  "version": "1.0.0",
-  "description": "City telemetry logger — As-Suwayda mapping project",
+  "version": "3.0.0",
+  "description": "City road quality telemetry logger — As-Suwayda mapping project",
   "scripts": {
     "sync": "npx cap sync",
     "open": "npx cap open android"
   },
   "dependencies": {
-    "@capacitor/android": "7.x",
-    "@capacitor/app":     "7.x",
-    "@capacitor/core":    "7.x",
+    "@capacitor/android":  "7.x",
+    "@capacitor/app":      "7.x",
+    "@capacitor/core":     "7.x",
     "@capacitor/filesystem": "7.x",
-    "@capacitor/share": "7.x",
+    "@capacitor/share":    "7.x",
     "@danyalwe/capacitor-sensors": "^1.0.1",
     "@capacitor-community/text-to-speech": "5.x"
   },
