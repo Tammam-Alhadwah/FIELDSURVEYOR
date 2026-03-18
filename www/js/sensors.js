@@ -1,12 +1,15 @@
 // ── FIELDSURVEYOR ── sensors.js ────────────────────────────────────────────────
 // Handles: Battery API, Network Info, Wake Lock, Generic Sensor API
-// (Linear Acceleration, Magnetometer, AbsoluteOrientation, Gravity, AmbientLight)
+// (Linear Acceleration, Magnetometer, AbsoluteOrientation, Gravity)
 // Also handles DeviceMotion and DeviceOrientation raw event processing.
+//
+// AmbientLightSensor removed — rarely supported on Android, produced noisy
+// "not supported" logs and was unused by any road-quality algorithm.
 //
 // GPS is NOT started here — it is tied to the recording lifecycle in recording.js.
 
 import { sensors, session, genericSensorInstances } from './state.js';
-import { log, setBadge }                                      from './utils.js';
+import { log, setBadge }                              from './utils.js';
 
 // ── Battery API ────────────────────────────────────────────────────────────────
 export async function initBattery() {
@@ -30,7 +33,7 @@ export async function initBattery() {
       const db = document.getElementById('dash-bat');
       if (db) db.textContent = pct + '%';
     };
-    bat.addEventListener('levelchange', update);
+    bat.addEventListener('levelchange',   update);
     bat.addEventListener('chargingchange', update);
     update();
     log('Battery API: OK', 'ok');
@@ -42,15 +45,15 @@ export function initNetwork() {
   const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   if (!c) { log('Network Info API: not supported', 'warn'); return; }
   const update = () => {
-    sensors.network.type      = c.type || '?';
-    sensors.network.effType   = c.effectiveType || '?';
-    sensors.network.downlink  = c.downlink ?? null;
-    sensors.network.rtt       = c.rtt ?? null;
+    sensors.network.type     = c.type || '?';
+    sensors.network.effType  = c.effectiveType || '?';
+    sensors.network.downlink = c.downlink ?? null;
+    sensors.network.rtt      = c.rtt ?? null;
     const eff = sensors.network.effType;
     setBadge('badgeNetwork', `NET: ${eff}`, eff?.includes('4g') ? 'ok' : 'warn');
-    const vn  = document.getElementById('v-net');     if (vn)  vn.textContent  = eff;
-    const vnd = document.getElementById('v-net-dl');  if (vnd) vnd.textContent = sensors.network.downlink ? sensors.network.downlink + ' Mbps' : '';
-    const vr  = document.getElementById('v-rtt');     if (vr)  vr.textContent  = sensors.network.rtt ?? '—';
+    const vn  = document.getElementById('v-net');    if (vn)  vn.textContent  = eff;
+    const vnd = document.getElementById('v-net-dl'); if (vnd) vnd.textContent = sensors.network.downlink ? sensors.network.downlink + ' Mbps' : '';
+    const vr  = document.getElementById('v-rtt');    if (vr)  vr.textContent  = sensors.network.rtt ?? '—';
   };
   c.addEventListener('change', update);
   update();
@@ -86,7 +89,7 @@ export function stopGenericSensors() {
 export function initGenericSensors() {
   stopGenericSensors();
 
-  // Linear Acceleration (gravity-free) ─────────────────────────────────────────
+  // Linear Acceleration (gravity-free) ──────────────────────────────────────
   if ('LinearAccelerationSensor' in window) {
     try {
       const s = new LinearAccelerationSensor({ frequency: 20 });
@@ -100,7 +103,7 @@ export function initGenericSensors() {
     } catch(e) { log('LinearAccel: ' + e.message, 'warn'); }
   }
 
-  // Magnetometer ────────────────────────────────────────────────────────────────
+  // Magnetometer ────────────────────────────────────────────────────────────
   const updateMag = (x, y, z) => {
     sensors.mag = { x, y, z };
     const t = Math.sqrt(x ** 2 + y ** 2 + z ** 2);
@@ -126,15 +129,23 @@ export function initGenericSensors() {
     try {
       const s = new Magnetometer({ frequency: 5 });
       s.addEventListener('reading', () => updateMag(s.x ?? 0, s.y ?? 0, s.z ?? 0));
-      s.addEventListener('error', e => { setBadge('badgeMag', 'MAG: ERR', 'err'); log('Magnetometer: ' + e.error, 'warn'); });
+      s.addEventListener('error', e => {
+        setBadge('badgeMag', 'MAG: ERR', 'err');
+        log('Magnetometer: ' + e.error, 'warn');
+      });
       s.start();
       genericSensorInstances.push(s);
       setBadge('badgeMag', 'MAG: ON', 'ok');
       log('Web Magnetometer: active', 'ok');
-    } catch(e) { setBadge('badgeMag', 'MAG: N/A', 'idle'); log('Magnetometer: ' + e.message, 'warn'); }
-  } else { setBadge('badgeMag', 'MAG: N/A', 'idle'); }
+    } catch(e) {
+      setBadge('badgeMag', 'MAG: N/A', 'idle');
+      log('Magnetometer: ' + e.message, 'warn');
+    }
+  } else {
+    setBadge('badgeMag', 'MAG: N/A', 'idle');
+  }
 
-  // Absolute Orientation (quaternion) ───────────────────────────────────────────
+  // Absolute Orientation (quaternion) ─────────────────────────────────────────
   if ('AbsoluteOrientationSensor' in window) {
     try {
       const s = new AbsoluteOrientationSensor({ frequency: 10 });
@@ -153,7 +164,7 @@ export function initGenericSensors() {
     } catch(e) { log('AbsoluteOrientation: ' + e.message, 'warn'); }
   }
 
-  // Gravity Sensor ──────────────────────────────────────────────────────────────
+  // Gravity Sensor ────────────────────────────────────────────────────────────
   if ('GravitySensor' in window) {
     try {
       const s = new GravitySensor({ frequency: 5 });
@@ -166,23 +177,6 @@ export function initGenericSensors() {
       log('GravitySensor: active', 'ok');
     } catch(e) { log('GravitySensor: ' + e.message, 'warn'); }
   }
-
-  // Ambient Light ───────────────────────────────────────────────────────────────
-  if ('AmbientLightSensor' in window) {
-    try {
-      const s = new AmbientLightSensor({ frequency: 2 });
-      s.addEventListener('reading', () => {
-        sensors.lux = s.illuminance;
-        const el = document.getElementById('v-lux'); if (el) el.textContent = s.illuminance?.toFixed(0) ?? '—';
-        setBadge('badgeLight', `LUX: ${s.illuminance?.toFixed(0)}`, 'ok');
-      });
-      s.addEventListener('error', e => { setBadge('badgeLight', 'LUX: N/A', 'idle'); log('AmbientLight: ' + e.error, 'warn'); });
-      s.start();
-      genericSensorInstances.push(s);
-      setBadge('badgeLight', 'LUX: ON', 'ok');
-      log('AmbientLightSensor: active', 'ok');
-    } catch(e) { setBadge('badgeLight', 'LUX: N/A', 'idle'); log('AmbientLight: ' + e.message, 'warn'); }
-  } else { setBadge('badgeLight', 'LUX: N/A', 'idle'); }
 }
 
 // ── DeviceMotion ───────────────────────────────────────────────────────────────

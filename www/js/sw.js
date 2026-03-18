@@ -1,11 +1,12 @@
-const CACHE     = 'fieldsurveyor-v3';
+const CACHE     = 'fieldsurveyor-V4';
 const MAP_CACHE = 'fieldsurveyor-maps';
-const ASSETS    = ['./index.html', './manifest.json', './styles/main.css',
+ 
+const ASSETS    = ['./index.html', './viewer.html', './manifest.json', './styles/main.css',
                    './js/app.js', './js/constants.js', './js/state.js',
                    './js/utils.js', './js/sensors.js', './js/map.js',
                    './js/recording.js', './js/history.js', './js/replay.js',
                    './js/pois.js', './js/coverage.js', './js/voice.js',
-                   './js/panel-dock.js'];
+                   './js/panel-dock.js', './js/db.js', './js/viewer.js'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));

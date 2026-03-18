@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>FieldSurveyor — Trip Viewer</title>
+  <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Barlow+Condensed:wght@300;500;700;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:#080c0a; --surface:#0f1612; --surface2:#161f1a;
+      --border:#1e2e24; --accent:#39ff84; --accent-dim:#1a7a3d;
+      --amber:#ffb830; --red:#ff4444; --blue:#4af; --purple:#c084fc;
+      --text:#c8d9cc; --text-dim:#5a7063;
+      --mono:'Space Mono',monospace; --display:'Barlow Condensed',sans-serif;
+    }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body {
+      font-family:var(--mono); background:var(--bg); color:var(--text);
+      overflow:hidden; height:100vh; display:flex; flex-direction:column;
+    }
+
+    /* ── TOP BAR ── */
+    #v-topbar {
+      display:flex; align-items:center; gap:10px;
+      height:44px; padding:0 12px; flex-shrink:0;
+      background:var(--surface); border-bottom:1px solid var(--border);
+      z-index:100;
+    }
+    #v-topbar a {
+      font-family:var(--display); font-size:13px; font-weight:700;
+      letter-spacing:.1em; color:var(--text-dim); text-decoration:none;
+      padding:4px 8px; border:1px solid var(--border); border-radius:4px;
+      transition:color .15s, border-color .15s;
+    }
+    #v-topbar a:hover { color:var(--accent); border-color:var(--accent-dim); }
+    #v-topbar .title {
+      font-family:var(--display); font-size:15px; font-weight:900;
+      letter-spacing:.12em; color:var(--accent); flex:1;
+    }
+    #v-sessions-btn {
+      font-family:var(--display); font-size:12px; font-weight:700;
+      letter-spacing:.1em; padding:5px 10px; border-radius:4px;
+      border:1px solid var(--border); background:transparent;
+      color:var(--text-dim); cursor:pointer; transition:all .15s;
+    }
+    #v-sessions-btn:hover { color:var(--accent); border-color:var(--accent-dim); }
+
+    /* ── LAYOUT: portrait = column, landscape = row ── */
+    #v-body { display:flex; flex:1; overflow:hidden; flex-direction:column; }
+    @media (orientation:landscape) and (min-width:600px) {
+      #v-body { flex-direction:row; }
+      #v-map  { flex:1; height:100%; }
+      #v-panel { flex:0 0 340px; height:100%; overflow-y:auto; }
+    }
+
+    /* ── MAP ── */
+    #v-map { flex:0 0 45vh; position:relative; }
+    @media (orientation:landscape) and (min-width:600px) { #v-map { flex:1; } }
+    #v-loading {
+      position:absolute; inset:0; background:rgba(8,12,10,.85);
+      display:flex; align-items:center; justify-content:center;
+      font-family:var(--display); font-size:12px; letter-spacing:.2em;
+      color:var(--text-dim); z-index:50; display:none;
+    }
+
+    /* ── PANEL ── */
+    #v-panel {
+      flex:1; display:flex; flex-direction:column; overflow:hidden;
+      background:var(--surface); border-top:1px solid var(--border);
+    }
+    @media (orientation:landscape) and (min-width:600px) {
+      #v-panel { border-top:none; border-left:1px solid var(--border); }
+    }
+
+    /* ── SESSION INFO ── */
+    #v-session-info {
+      padding:10px 14px 8px;
+      border-bottom:1px solid var(--border);
+      flex-shrink:0;
+    }
+    #v-session-date {
+      font-family:var(--display); font-size:13px; font-weight:700;
+      letter-spacing:.08em; color:var(--text); margin-bottom:5px;
+    }
+    .v-stat-row {
+      display:flex; gap:12px; flex-wrap:wrap;
+      font-family:var(--display); font-size:11px; color:var(--text-dim); letter-spacing:.06em;
+    }
+    .v-stat-row span { color:var(--amber); }
+
+    /* ── SENSITIVITY SLIDER ── */
+    #v-sensitivity {
+      padding:12px 14px 10px;
+      border-bottom:1px solid var(--border);
+      flex-shrink:0;
+      background:var(--surface2);
+    }
+    .v-sens-header {
+      display:flex; align-items:center; justify-content:space-between;
+      margin-bottom:8px;
+    }
+    .v-sens-title {
+      font-family:var(--display); font-size:10px; font-weight:700;
+      letter-spacing:.2em; color:var(--text-dim); text-transform:uppercase;
+    }
+    .v-sens-label-badge {
+      font-family:var(--display); font-size:11px; font-weight:700;
+      letter-spacing:.1em; padding:2px 8px; border-radius:3px;
+      background:rgba(57,255,132,.12); color:var(--accent);
+      border:1px solid var(--accent-dim);
+    }
+    #v-sens-slider {
+      -webkit-appearance:none; appearance:none;
+      width:100%; height:6px; border-radius:3px; cursor:pointer; outline:none;
+      background:linear-gradient(to right, #ff4444 0%, #ffb830 35%, #39ff84 100%);
+      margin-bottom:8px;
+    }
+    #v-sens-slider::-webkit-slider-thumb {
+      -webkit-appearance:none; appearance:none;
+      width:20px; height:20px; border-radius:50%;
+      background:var(--surface); border:3px solid var(--accent);
+      cursor:grab; box-shadow:0 0 8px rgba(57,255,132,.4);
+    }
+    #v-sens-slider::-moz-range-thumb {
+      width:20px; height:20px; border-radius:50%;
+      background:var(--surface); border:3px solid var(--accent);
+      cursor:grab;
+    }
+    .v-sens-axis {
+      display:flex; justify-content:space-between;
+      font-family:var(--display); font-size:9px; letter-spacing:.12em;
+      color:var(--text-dim); margin-bottom:10px;
+    }
+    .v-sens-axis .left  { color:var(--red); }
+    .v-sens-axis .right { color:var(--accent); }
+    .v-sens-stats {
+      display:flex; gap:14px; flex-wrap:wrap;
+      font-family:var(--display); font-size:12px;
+    }
+    .v-sens-stat .label { font-size:9px; letter-spacing:.15em; color:var(--text-dim); text-transform:uppercase; }
+    .v-sens-stat .value { font-size:20px; font-weight:700; color:var(--accent); line-height:1.1; }
+    .v-sens-stat.red .value  { color:var(--red); }
+    .v-sens-stat.amber .value { color:var(--amber); }
+
+    /* ── TABS ── */
+    #v-tabs {
+      display:flex; border-bottom:1px solid var(--border);
+      flex-shrink:0;
+    }
+    .v-tab-btn {
+      flex:1; padding:9px 4px; border:none; background:transparent;
+      font-family:var(--display); font-size:11px; font-weight:700;
+      letter-spacing:.12em; text-transform:uppercase;
+      color:var(--text-dim); cursor:pointer; border-bottom:2px solid transparent;
+      transition:all .15s;
+    }
+    .v-tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+    .v-tab-btn:hover  { color:var(--text); }
+
+    /* ── TAB CONTENT ── */
+    #v-tab-content {
+      flex:1; overflow-y:auto; padding:12px;
+      scrollbar-width:thin; scrollbar-color:var(--border) transparent;
+    }
+    .v-tab-pane { display:none; }
+    .chart-legend {
+      display:flex; gap:14px; flex-wrap:wrap; margin-top:6px;
+      font-size:10px; color:var(--text-dim);
+    }
+    #v-chart { width:100%; border-radius:5px; border:1px solid var(--border); display:block; }
+
+    /* ── EXPORT ROW ── */
+    .v-export-row { display:flex; gap:8px; margin-top:12px; }
+    .v-export-btn {
+      flex:1; font-family:var(--display); font-size:12px; font-weight:700;
+      letter-spacing:.1em; padding:10px; border-radius:5px; cursor:pointer;
+      border:1px solid var(--border); background:transparent;
+      color:var(--blue); transition:all .15s;
+    }
+    .v-export-btn:hover { background:rgba(68,170,255,.1); border-color:#1a4a7a; }
+
+    /* ── SHARED ANN/POI STYLES ── */
+    .ann-item { display:flex; align-items:center; gap:10px; background:var(--surface2); border:1px solid var(--border); border-radius:5px; padding:8px 10px; margin-bottom:6px; }
+    .ann-play { font-family:var(--display); font-size:11px; font-weight:700; padding:5px 9px; border-radius:3px; cursor:pointer; border:1px solid var(--accent-dim); background:transparent; color:var(--accent); min-width:36px; }
+    .ann-info { flex:1; min-width:0; }
+    .ann-info .ai-time   { font-size:11px; color:var(--text-dim); }
+    .ann-info .ai-coords { font-size:10px; color:var(--accent); }
+    .vs-empty { text-align:center; color:var(--text-dim); font-size:12px; padding:20px 0; }
+
+    /* ── SESSIONS DRAWER ── */
+    #v-drawer-backdrop {
+      position:fixed; inset:0; background:rgba(0,0,0,.6);
+      z-index:200; opacity:0; pointer-events:none; transition:opacity .25s;
+    }
+    #v-drawer {
+      position:fixed; top:0; bottom:0; right:-320px; width:300px;
+      background:var(--surface); border-left:1px solid var(--border);
+      z-index:210; display:flex; flex-direction:column;
+      transition:right .25s cubic-bezier(0.4,0,0.2,1);
+      overflow:hidden;
+    }
+    #v-drawer.open { right:0; }
+    #v-drawer.open + #v-drawer-backdrop { opacity:1; pointer-events:auto; }
+    .v-drawer-header {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 14px; border-bottom:1px solid var(--border); flex-shrink:0;
+      font-family:var(--display); font-size:12px; font-weight:700;
+      letter-spacing:.2em; color:var(--text-dim); text-transform:uppercase;
+    }
+    #v-drawer-close {
+      background:transparent; border:none; color:var(--text-dim);
+      font-size:16px; cursor:pointer; padding:4px 8px;
+    }
+    #v-session-list { flex:1; overflow-y:auto; padding:8px; }
+    .vs-item {
+      padding:10px 10px 10px 12px; border-radius:5px; margin-bottom:6px;
+      border:1px solid var(--border); cursor:pointer;
+      background:var(--surface2); position:relative;
+      transition:background .12s, border-color .12s;
+    }
+    .vs-item:hover    { background:rgba(57,255,132,.05); border-color:var(--accent-dim); }
+    .vs-item.vs-active { border-color:var(--accent); background:rgba(57,255,132,.08); }
+    .vs-date  { font-family:var(--display); font-size:11px; font-weight:700; letter-spacing:.06em; color:var(--text); margin-bottom:3px; }
+    .vs-stats { font-size:10px; color:var(--text-dim); }
+    .vs-del {
+      position:absolute; right:8px; top:50%; transform:translateY(-50%);
+      background:transparent; border:1px solid var(--border); color:var(--text-dim);
+      border-radius:3px; padding:2px 6px; font-size:11px; cursor:pointer;
+    }
+    .vs-del:hover { color:var(--red); border-color:var(--red); }
+  </style>
+</head>
+<body>
+
+<!-- ── TOP BAR ── -->
+<div id="v-topbar">
+  <a href="index.html">← BACK</a>
+  <span class="title">TRIP VIEWER</span>
+  <button id="v-sessions-btn">☰ TRIPS</button>
+</div>
+
+<!-- ── MAIN BODY ── -->
+<div id="v-body">
+
+  <!-- MAP -->
+  <div id="v-map">
+    <div id="v-loading">LOADING SESSION…</div>
+  </div>
+
+  <!-- PANEL -->
+  <div id="v-panel">
+
+    <!-- SESSION INFO -->
+    <div id="v-session-info">
+      <div id="v-session-date">No session loaded</div>
+      <div class="v-stat-row">
+        <div><span id="v-stat-dist">—</span></div>
+        <div><span id="v-stat-dur">—</span></div>
+        <div><span id="v-stat-pts">—</span></div>
+        <div><span id="v-stat-maxspd">—</span></div>
+      </div>
+    </div>
+
+    <!-- SENSITIVITY SLIDER -->
+    <div id="v-sensitivity">
+      <div class="v-sens-header">
+        <span class="v-sens-title">BUMP SENSITIVITY</span>
+        <span class="v-sens-label-badge" id="v-live-label">MEDIUM</span>
+      </div>
+      <input type="range" id="v-sens-slider" min="3" max="18" step="0.5" value="8">
+      <div class="v-sens-axis">
+        <span class="left">◀ MORE SENSITIVE</span>
+        <span id="v-live-thresh">8.0 m/s²</span>
+        <span class="right">LESS SENSITIVE ▶</span>
+      </div>
+      <div class="v-sens-stats">
+        <div class="v-sens-stat red">
+          <div class="label">BUMPS</div>
+          <div class="value" id="v-live-bumps">—</div>
+        </div>
+        <div class="v-sens-stat amber">
+          <div class="label">ROUGH SEGS</div>
+          <div class="value" id="v-live-rough">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TABS -->
+    <div id="v-tabs">
+      <button class="v-tab-btn" data-tab="chart">📊 CHART</button>
+      <button class="v-tab-btn" data-tab="anns">🎙 NOTES</button>
+      <button class="v-tab-btn" data-tab="pois">📌 PINS</button>
+      <button class="v-tab-btn" data-tab="export">↓ EXPORT</button>
+    </div>
+
+    <!-- TAB CONTENT -->
+    <div id="v-tab-content">
+
+      <div class="v-tab-pane" id="v-tab-chart">
+        <canvas id="v-chart"></canvas>
+        <div class="chart-legend">
+          <span style="color:var(--accent)">─── Speed</span>
+          <span style="color:var(--red)">▓ Roughness</span>
+          <span style="color:var(--amber)">│ Bumps (recorded)</span>
+        </div>
+        <p style="font-size:10px;color:var(--text-dim);margin-top:8px;line-height:1.6">
+          Chart shows roughness and speed as recorded. Drag the sensitivity slider above to recolor the <strong style="color:var(--text)">map trail</strong> and recount bumps in real time.
+        </p>
+      </div>
+
+      <div class="v-tab-pane" id="v-tab-anns">
+        <div id="v-anns-list"></div>
+      </div>
+
+      <div class="v-tab-pane" id="v-tab-pois">
+        <div id="v-pois-list"></div>
+      </div>
+
+      <div class="v-tab-pane" id="v-tab-export">
+        <p style="font-size:11px;color:var(--text-dim);margin-bottom:12px;line-height:1.7">
+          Export this session. CSV includes all sensor columns plus
+          <code style="color:var(--accent)">voice_annotation_id</code> — the audio file ID for rows where a clip was recorded.
+          GeoJSON includes the route, bump points, pins, and annotation markers.
+        </p>
+        <div class="v-export-row">
+          <button class="v-export-btn" id="v-export-csv">↓ CSV</button>
+          <button class="v-export-btn" id="v-export-geojson">↓ GEOJSON</button>
+        </div>
+      </div>
+
+    </div><!-- end #v-tab-content -->
+  </div><!-- end #v-panel -->
+</div><!-- end #v-body -->
+
+<!-- ── SESSIONS DRAWER ── -->
+<div id="v-drawer">
+  <div class="v-drawer-header">
+    RECORDED TRIPS
+    <button id="v-drawer-close">✕</button>
+  </div>
+  <div id="v-session-list"></div>
+</div>
+<div id="v-drawer-backdrop"></div>
+
+<!-- MapLibre GL JS -->
+<script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+<script type="module" src="js/viewer.js"></script>
+</body>
+</html>

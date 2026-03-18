@@ -1,25 +1,23 @@
 // ── FIELDSURVEYOR ── recording.js ──────────────────────────────────────────────
 // Owns the recording lifecycle: start → GPS/IMU tick → stop → export.
-// GPS timeout warning and auto-save live here.
 
-import { sensors, session, mapState, poiState, potholeState } from './state.js';
+import { sensors, session, mapState, poiState,
+         potholeState, voiceState, settings }                 from './state.js';
 import { log, setBadge, haversine, fmt, csvEscape,
          fmtDuration, fmtDurationShort,
          computeRoughness, roughnessLabel,
-         computeIRI, haptic, speak }                           from './utils.js';
+         computeIRI, haptic, speak }                          from './utils.js';
 import { requestWakeLock, initGenericSensors, stopGenericSensors,
-         handleMotion, handleOrientation }                     from './sensors.js';
+         handleMotion, handleOrientation }                    from './sensors.js';
 import { mapFollowCar, showCarLayers, pushRouteSegment,
-         pushBump, resetLiveLayers, drawCompass }              from './map.js';
-import { buildHistoryBumpIndex, saveSessionToHistory }        from './history.js';
-import { initVoiceRecognition, stopVoice }                    from './voice.js';
-import { SESSION_KEY, BUMP_THRESHOLD_RAW, BUMP_THRESHOLD_CLEAN,
-         GPS_TIMEOUT_WARN, POTHOLE_ALERT_COOLDOWN,
-         POTHOLE_ALERT_RADIUS_KM }                             from './constants.js';
+         pushBump, resetLiveLayers, drawCompass }             from './map.js';
+import { buildHistoryBumpIndex, saveSessionToHistory }       from './history.js';
+import { saveSession }                                        from './db.js';
+import { SESSION_KEY, GPS_TIMEOUT_WARN,
+         POTHOLE_ALERT_COOLDOWN, POTHOLE_ALERT_RADIUS_KM }   from './constants.js';
 
 // ── START ──────────────────────────────────────────────────────────────────────
 export async function startRecording() {
-  // Unlock TTS on iOS (requires user gesture)
   try {
     if ('speechSynthesis' in window) {
       const u = new SpeechSynthesisUtterance(''); u.volume = 0;
@@ -27,7 +25,6 @@ export async function startRecording() {
     }
   } catch(_) {}
 
-  // Request iOS motion permission
   if (typeof DeviceMotionEvent?.requestPermission === 'function') {
     try {
       const p = await DeviceMotionEvent.requestPermission();
@@ -35,7 +32,6 @@ export async function startRecording() {
     } catch(e) { console.error(e); }
   }
 
-  // Reset all session state
   Object.assign(session, {
     active: true, data: [], startTime: Date.now(),
     distKm: 0, bumpCount: 0, maxSpeed: 0,
@@ -44,17 +40,14 @@ export async function startRecording() {
     prevLat: 0, prevLng: 0, prevRoutePoint: null,
     lastGpsTime: 0,
   });
+  voiceState.annotations = [];
   poiState.pois = [];
   resetLiveLayers();
-
-  // UI: hide start, show stop
   setUI({ recording: true });
 
   await requestWakeLock();
   initGenericSensors();
-  initVoiceRecognition();
 
-  // Start GPS
   if ('geolocation' in navigator) {
     session.geoWatchId = navigator.geolocation.watchPosition(
       onGPSUpdate,
@@ -69,7 +62,6 @@ export async function startRecording() {
   window.addEventListener('devicemotion',      handleMotion);
   window.addEventListener('deviceorientation', handleOrientation);
   setBadge('badgeMotion', 'IMU: ON', 'ok');
-
   session.recordingInterval = setInterval(onRecordingTick, 1000);
   log('Recording started', 'ok');
   speak('Telemetry online. Searching for GPS satellites.');
@@ -85,7 +77,6 @@ function onGPSUpdate(pos) {
   };
   session.lastGpsTime = Date.now();
 
-  // First fix
   if (session.prevLat === 0) {
     if (mapState.loaded) {
       mapState.map.jumpTo({ center: [sensors.gps.lng, sensors.gps.lat], zoom: 16 });
@@ -95,7 +86,6 @@ function onGPSUpdate(pos) {
     buildHistoryBumpIndex();
   }
 
-  // Track distance and max speed
   const kmh = sensors.gps.speed * 3.6;
   if (kmh > session.maxSpeed) {
     session.maxSpeed = kmh;
@@ -113,7 +103,6 @@ function onGPSUpdate(pos) {
   session.prevLat = sensors.gps.lat;
   session.prevLng = sensors.gps.lng;
 
-  // GPS quality badge + bar
   const quality = Math.max(0, Math.min(100, 100 - (sensors.gps.acc / 50) * 100));
   const bar = document.getElementById('gpsBar'); if (bar) bar.style.width = quality + '%';
   setBadge('badgeGPS', `GPS: ${sensors.gps.acc?.toFixed(0) ?? '?'}m`, quality > 60 ? 'ok' : 'warn');
@@ -122,7 +111,6 @@ function onGPSUpdate(pos) {
   const dgps = document.getElementById('dash-gps');
   if (dgps) dgps.textContent = sensors.gps.acc ? fmt(sensors.gps.acc, 0) + 'm' : '—';
 
-  // Pothole ahead from history
   checkPotholeAhead();
 }
 
@@ -131,30 +119,31 @@ function onRecordingTick() {
   const elapsed = Math.floor((Date.now() - session.startTime) / 1000);
   const ts      = new Date().toISOString();
 
-  // Drain accelerometer buffer
-  const peakMag = session.magBuffer.length ? Math.max(...session.magBuffer)    : 0;
-  const avgMag  = session.magBuffer.length ? session.magBuffer.reduce((a, b) => a + b, 0) / session.magBuffer.length : 0;
+  const peakMag = session.magBuffer.length ? Math.max(...session.magBuffer) : 0;
+  const avgMag  = session.magBuffer.length
+    ? session.magBuffer.reduce((a, b) => a + b, 0) / session.magBuffer.length : 0;
   session.magBuffer = [];
 
-  const bumpThr  = session.usingGravityFreeAccel ? BUMP_THRESHOLD_CLEAN : BUMP_THRESHOLD_RAW;
-  const isBump   = peakMag > bumpThr;
-  const roughness = computeRoughness(peakMag, session.usingGravityFreeAccel);
+  // Use live sensitivity settings
+  const bumpThr   = session.usingGravityFreeAccel
+    ? settings.bumpThresholdClean
+    : settings.bumpThresholdRaw;
+  const isBump    = peakMag > bumpThr;
+  const roughness = computeRoughnessWithThreshold(peakMag, session.usingGravityFreeAccel, settings.bumpThresholdClean);
   const kmh       = sensors.gps.speed * 3.6;
 
-  // Trip computer
   if (kmh > 2) session.tripSpeedSamples.push(kmh);
   const avgSpeed = session.tripSpeedSamples.length
     ? session.tripSpeedSamples.reduce((a, b) => a + b, 0) / session.tripSpeedSamples.length : 0;
   const iri = computeIRI(avgMag, kmh, session.usingGravityFreeAccel);
   if (iri !== null) session.tripIRISamples.push(iri);
-  const avgIRI = session.tripIRISamples.length
+  const avgIRI     = session.tripIRISamples.length
     ? session.tripIRISamples.reduce((a, b) => a + b, 0) / session.tripIRISamples.length : null;
   const bumpsPerKm = session.distKm > 0.1 ? (session.bumpCount / session.distKm).toFixed(1) : '—';
 
-  // GPS timeout warning
   if (session.lastGpsTime > 0 && Date.now() - session.lastGpsTime > GPS_TIMEOUT_WARN) {
     const age = Date.now() - session.lastGpsTime;
-    if (age < GPS_TIMEOUT_WARN + 2000) {  // fire the warning only once per timeout event
+    if (age < GPS_TIMEOUT_WARN + 2000) {
       log('⚠ No GPS signal for 30+ seconds — check line-of-sight to sky', 'warn');
       speak('Warning. GPS signal lost.', true);
     }
@@ -163,22 +152,16 @@ function onRecordingTick() {
   // ── DOM updates ──────────────────────────────────────────────────────────────
   const timer = document.getElementById('elapsedTimer'); if (timer) timer.textContent = fmtDuration(elapsed);
   const de    = document.getElementById('dash-elapsed'); if (de)    de.textContent    = fmtDuration(elapsed);
-
   setText('tc-avg',  avgSpeed > 0 ? avgSpeed.toFixed(1) : '—');
   setText('tc-iri',  avgIRI !== null ? avgIRI.toFixed(2) : '—');
   setText('tc-bpk',  bumpsPerKm);
-
-  const dashAvg  = document.getElementById('dash-avg');  if (dashAvg)  dashAvg.textContent  = avgSpeed > 0 ? Math.round(avgSpeed) + '' : '—';
-  const dashDist = document.getElementById('dash-dist'); if (dashDist) dashDist.textContent = session.distKm.toFixed(2);
-  const dashBmps = document.getElementById('dash-bumps');if (dashBmps) dashBmps.textContent = session.bumpCount;
+  const dashAvg  = document.getElementById('dash-avg');   if (dashAvg)  dashAvg.textContent  = avgSpeed > 0 ? Math.round(avgSpeed) + '' : '—';
+  const dashDist = document.getElementById('dash-dist');  if (dashDist) dashDist.textContent = session.distKm.toFixed(2);
+  const dashBmps = document.getElementById('dash-bumps'); if (dashBmps) dashBmps.textContent = session.bumpCount;
   const dashSurf = document.getElementById('dash-surface'); if (dashSurf) dashSurf.innerHTML = roughnessLabel(roughness);
-
-  // HUD + camera
   const hs = document.getElementById('hud-speed'); if (hs) hs.textContent = Math.round(kmh);
   mapFollowCar(sensors.gps.lng, sensors.gps.lat, kmh, sensors.gps.heading);
   if (mapState.dashboardActive) drawCompass(sensors.gps.heading ?? sensors.orient.alpha);
-
-  // Sensor display panel
   updateSensorDisplay(peakMag, kmh);
 
   // ── Bump event ───────────────────────────────────────────────────────────────
@@ -206,6 +189,13 @@ function onRecordingTick() {
   if (cd) cd.innerHTML =
     `<span class="highlight">${fmt(sensors.gps.lat, 5)}°N, ${fmt(sensors.gps.lng, 5)}°E</span>` +
     (sensors.gps.alt !== null ? `  <span class="highlight-amber">alt ${fmt(sensors.gps.alt, 0)}m</span>` : '');
+
+  // ── Find nearest annotation for this tick (for CSV column) ──────────────────
+  const tickTime = Date.now();
+  const recentAnn = voiceState.annotations.find(a => {
+    const at = new Date(a.ts).getTime();
+    return at >= tickTime - 1000 && at < tickTime;
+  });
 
   // ── CSV row ──────────────────────────────────────────────────────────────────
   const magTot = sensors.mag.x !== null
@@ -237,17 +227,16 @@ function onRecordingTick() {
     quat_y: sensors.abs.y !== null ? fmt(sensors.abs.y, 4) : '',
     quat_z: sensors.abs.z !== null ? fmt(sensors.abs.z, 4) : '',
     gravity_z: sensors.gravZ !== null ? fmt(sensors.gravZ, 3) : '',
-    ambient_lux: sensors.lux !== null ? fmt(sensors.lux, 1) : '',
     battery_pct: sensors.battery.level !== null ? Math.round(sensors.battery.level * 100) : '',
     charging: sensors.battery.charging !== null ? (sensors.battery.charging ? 1 : 0) : '',
     net_type: sensors.network.type ?? '',
     net_eff_type: sensors.network.effType ?? '',
     net_downlink_mbps: sensors.network.downlink ?? '',
     net_rtt_ms: sensors.network.rtt ?? '',
+    voice_annotation_id: recentAnn ? recentAnn.audioId : '',  // ← new column
   };
   if (sensors.gps.lat !== 0) session.data.push(dp);
 
-  // Auto-save every 60 records
   if (session.data.length > 0 && session.data.length % 60 === 0) {
     try {
       localStorage.setItem(SESSION_KEY, JSON.stringify({ ts, data: session.data }));
@@ -256,12 +245,22 @@ function onRecordingTick() {
   }
 }
 
-// ── Sensor display panel updates ───────────────────────────────────────────────
+// ── Roughness with configurable threshold ──────────────────────────────────────
+// roughness = eff / (threshold * 1.5) so trail colors shift with sensitivity.
+// At threshold=8 (default) this matches the original computeRoughness output.
+export function computeRoughnessWithThreshold(peak, gravFree, cleanThreshold) {
+  const baseline = gravFree ? 0 : 9.0;
+  const eff      = Math.max(0, peak - baseline);
+  return Math.min(1, Math.max(0, eff / (cleanThreshold * 1.5)));
+}
+
+// ── Sensor display ─────────────────────────────────────────────────────────────
 function updateSensorDisplay(peakMag, kmh) {
-  const bumpThr = session.usingGravityFreeAccel ? BUMP_THRESHOLD_CLEAN : BUMP_THRESHOLD_RAW;
+  const bumpThr = session.usingGravityFreeAccel
+    ? settings.bumpThresholdClean
+    : settings.bumpThresholdRaw;
   const lbl = document.getElementById('v-bump-label');
   if (lbl) lbl.textContent = `m/s² — bump fires at >${bumpThr} (${session.usingGravityFreeAccel ? 'gravity-free' : 'raw+gravity'})`;
-
   setText('v-speed',    kmh.toFixed(1));
   setText('v-altitude', sensors.gps.alt !== null ? fmt(sensors.gps.alt, 0) : '—');
   setText('v-accuracy', sensors.gps.acc !== null ? fmt(sensors.gps.acc, 0) : '—');
@@ -285,31 +284,67 @@ function setText(id, val) {
 export function stopRecording() {
   session.active = false;
   clearInterval(session.recordingInterval);
-
   if (session.geoWatchId != null) navigator.geolocation.clearWatch(session.geoWatchId);
   window.removeEventListener('devicemotion',      handleMotion);
   window.removeEventListener('deviceorientation', handleOrientation);
   if (session.wakeLock && !session.wakeLock.released) session.wakeLock.release();
   stopGenericSensors();
-  stopVoice();
 
   const ab = document.getElementById('annotateBtn'); if (ab) ab.style.display = 'none';
 
-  // Final save
   if (session.data.length > 0) {
     try { localStorage.setItem(SESSION_KEY, JSON.stringify({ ts: new Date().toISOString(), data: session.data })); } catch(_) {}
   }
 
-  // Persist to history if we have a real route
   const { features } = mapState.geojsonRoute;
   if (features.length >= 2) saveSessionToHistory();
 
+  // ── Save full session to IndexedDB for the Trip Viewer ────────────────────
+  if (session.data.length > 0) {
+    const sessionId = new Date().toISOString();
+    const elapsed   = Math.floor((Date.now() - session.startTime) / 1000);
+
+    // Build compressed track for history overlay
+    const track = [];
+    const feats  = mapState.geojsonRoute.features;
+    if (feats.length > 0) {
+      const first = feats[0].geometry.coordinates[0];
+      track.push([+first[0].toFixed(6), +first[1].toFixed(6), 0]);
+    }
+    for (const feat of feats) {
+      const end = feat.geometry.coordinates[1];
+      track.push([+end[0].toFixed(6), +end[1].toFixed(6), +(feat.properties.roughness || 0).toFixed(3)]);
+    }
+
+    const dbSession = {
+      id:          sessionId,
+      stats: {
+        points:   session.data.length,
+        distKm:   +session.distKm.toFixed(2),
+        bumps:    session.bumpCount,
+        maxSpeed: +session.maxSpeed.toFixed(1),
+        duration: elapsed,
+      },
+      data:        session.data,           // full CSV rows — the viewer uses these
+      annotations: voiceState.annotations.map(a => ({
+        ts:      a.ts,
+        lat:     a.lat,
+        lng:     a.lng,
+        audioId: a.audioId,
+      })),
+      pois:  poiState.pois,
+      track,                               // compressed, for history compatibility
+    };
+
+    saveSession(dbSession)
+      .then(() => log(`Trip saved to viewer (${session.data.length} pts)`, 'ok'))
+      .catch(e => log('Trip save failed: ' + e.message, 'err'));
+  }
+
   setUI({ recording: false });
 
-  // Post-session
   if (session.data.length > 0) {
     document.getElementById('replayBtn').style.display = 'block';
-    // Store replay data (imported by replay.js)
     window.__replayData = [...session.data];
   }
   if (session.data.length > 1) drawSessionChart();
@@ -321,7 +356,7 @@ export function stopRecording() {
   const cd = document.getElementById('coordsDisplay');
   if (cd) cd.innerHTML = `<span class="highlight-amber">✓ ${session.data.length} pts · ${session.distKm.toFixed(2)} km · ${session.bumpCount} bumps</span>`;
 
-  ['badgeMotion', 'badgeWakeLock', 'badgeMag', 'badgeLight'].forEach(id =>
+  ['badgeMotion', 'badgeWakeLock', 'badgeMag'].forEach(id =>
     setBadge(id, id.replace('badge', '').toUpperCase() + ': OFF', 'idle')
   );
 }
@@ -363,6 +398,11 @@ export function exportGeoJSON() {
         type: 'Feature',
         properties: { type: 'poi', category: p.category, note: p.note || '', timestamp: p.ts },
         geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+      })),
+      ...voiceState.annotations.map(a => ({
+        type: 'Feature',
+        properties: { type: 'annotation', audio_id: a.audioId, timestamp: a.ts },
+        geometry: { type: 'Point', coordinates: [a.lng, a.lat] },
       })),
     ],
   };
@@ -410,11 +450,9 @@ function checkPotholeAhead() {
   const { bumpIndex, lastAlert } = potholeState;
   if (bumpIndex.length === 0 || sensors.gps.lat === 0 || sensors.gps.speed * 3.6 < 5) return;
   if (Date.now() - lastAlert < POTHOLE_ALERT_COOLDOWN) return;
-
-  const heading = (sensors.gps.heading ?? sensors.orient.alpha ?? 0) * Math.PI / 180;
+  const heading  = (sensors.gps.heading ?? sensors.orient.alpha ?? 0) * Math.PI / 180;
   const aheadLat = sensors.gps.lat + (0.08 / 111.32) * Math.cos(heading);
   const aheadLng = sensors.gps.lng + (0.08 / 111.32) * Math.sin(heading) / Math.cos(sensors.gps.lat * Math.PI / 180);
-
   for (const b of bumpIndex) {
     if (haversine(aheadLat, aheadLng, b.lat, b.lng) < POTHOLE_ALERT_RADIUS_KM) {
       potholeState.lastAlert = Date.now();
@@ -432,63 +470,44 @@ function drawSessionChart() {
   if (panel) panel.classList.add('active');
   const canvas = document.getElementById('sessionChart');
   if (!canvas) return;
-
   const dpr = window.devicePixelRatio || 1;
   const W   = canvas.offsetWidth || 320, H = 160;
   canvas.width = W * dpr; canvas.height = H * dpr;
   canvas.style.height = H + 'px';
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
-
-  ctx.fillStyle = '#0f1612';
-  ctx.fillRect(0, 0, W, H);
-
-  const n = session.data.length;
-  if (n < 2) return;
-
+  ctx.fillStyle = '#0f1612'; ctx.fillRect(0, 0, W, H);
+  const n = session.data.length; if (n < 2) return;
   const speeds    = session.data.map(d => parseFloat(d.speed_kmh) || 0);
   const roughness = session.data.map(d => parseFloat(d.road_roughness) || 0);
   const bumps     = session.data.map(d => parseInt(d.bump_detected) || 0);
   const maxSpeed  = Math.max(...speeds, 1);
-
   const PAD = { t: 10, b: 22, l: 8, r: 8 };
   const cW  = W - PAD.l - PAD.r, cH = H - PAD.t - PAD.b;
-
   ctx.strokeStyle = 'rgba(57,255,132,0.06)'; ctx.lineWidth = 1;
   [0.25, 0.5, 0.75, 1].forEach(f => {
     const y = PAD.t + cH * (1 - f);
     ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(PAD.l + cW, y); ctx.stroke();
   });
-
   const xOf    = i => PAD.l + cW * (i / (n - 1));
   const speedY = v => PAD.t + cH * (1 - v / maxSpeed);
   const roughY = v => PAD.t + cH * (1 - Math.min(v, 1));
-
-  // Roughness area
   ctx.beginPath(); ctx.moveTo(xOf(0), H - PAD.b);
   roughness.forEach((v, i) => ctx.lineTo(xOf(i), roughY(v)));
   ctx.lineTo(xOf(n - 1), H - PAD.b); ctx.closePath();
   ctx.fillStyle = 'rgba(255,68,68,0.2)'; ctx.fill();
-
-  // Roughness line
   ctx.beginPath(); ctx.strokeStyle = 'rgba(255,68,68,0.6)'; ctx.lineWidth = 1.5;
   roughness.forEach((v, i) => i === 0 ? ctx.moveTo(xOf(0), roughY(v)) : ctx.lineTo(xOf(i), roughY(v)));
   ctx.stroke();
-
-  // Speed line
   ctx.beginPath(); ctx.strokeStyle = 'rgba(57,255,132,0.85)'; ctx.lineWidth = 2;
   speeds.forEach((v, i) => i === 0 ? ctx.moveTo(xOf(0), speedY(v)) : ctx.lineTo(xOf(i), speedY(v)));
   ctx.stroke();
-
-  // Bump markers
   ctx.strokeStyle = 'rgba(255,184,48,0.8)'; ctx.lineWidth = 1.5;
   bumps.forEach((b, i) => {
     if (!b) return;
     const x = xOf(i);
     ctx.beginPath(); ctx.moveTo(x, PAD.t); ctx.lineTo(x, H - PAD.b); ctx.stroke();
   });
-
-  // Labels
   ctx.fillStyle = 'rgba(90,112,99,0.8)'; ctx.font = '9px Space Mono,monospace';
   ctx.textAlign = 'left';   ctx.fillText('0', PAD.l, H - 4);
   ctx.textAlign = 'right';  ctx.fillText(fmtDurationShort(session.data[n - 1]?.elapsed_s || 0), W - PAD.r, H - 4);
